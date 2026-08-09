@@ -5,6 +5,7 @@ import SwiftUI
 struct DeskBuddyApp: App {
     @StateObject private var controller = DeskController.shared
     @StateObject private var settings = SettingsStore.shared
+    @StateObject private var softwareUpdates = SoftwareUpdateController.shared
 
     init() {
         if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
@@ -25,6 +26,7 @@ struct DeskBuddyApp: App {
             case .symbolAndValue:
                 if let height = controller.heightCm {
                     Label(settings.formattedHeight(height), systemImage: "arrow.up.and.down")
+                        .labelStyle(.titleAndIcon)
                 } else {
                     Image(systemName: "arrow.up.and.down")
                 }
@@ -36,14 +38,11 @@ struct DeskBuddyApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        Window("DeskBuddy Settings", id: "settings") {
-            SettingsView()
+        Settings {
+            SettingsView(softwareUpdates: softwareUpdates)
                 .preferredColorScheme(preferredColorScheme)
                 .environment(\.locale, Locale(identifier: "en"))
         }
-        .defaultSize(width: 900, height: 620)
-        .windowResizability(.contentMinSize)
-        .defaultLaunchBehavior(.suppressed)
     }
 
     private var preferredColorScheme: ColorScheme? {

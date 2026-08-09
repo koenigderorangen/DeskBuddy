@@ -2,43 +2,61 @@ import AppKit
 import SwiftUI
 
 struct MenuContentView: View {
-    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     @ObservedObject var controller: DeskController
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var coach = PostureCoach.shared
-    @State private var showDeskSidebar = false
-    @State private var editingPreset: DeskPreset?
-    @State private var creatingPreset = false
-    @State private var showingDiagnostics = false
+    @State private var sidebarVisible = false
+    @State private var editorPresented = false
+    @State private var hoveredPresetID: UUID?
 
     var body: some View {
         GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 0) {
-                if showDeskSidebar {
+            ZStack(alignment: .leading) {
+                mainPanel
+
+                if sidebarVisible {
                     deskSidebar
                         .frame(width: DeskBuddyDesign.sidebarWidth)
+                        .background(.regularMaterial)
                         .transition(.move(edge: .leading).combined(with: .opacity))
-                    Divider()
+                        .zIndex(1)
                 }
+            }
+        }
+        .frame(width: DeskBuddyDesign.contentWidth, height: 480)
+        .clipped()
+    }
 
-                mainPanel
-                    .frame(width: DeskBuddyDesign.contentWidth)
-            }
+    private func editPreset(_ preset: DeskPreset) {
+        PresetEditorModel.shared.beginEditing(preset)
+        withAnimation(.snappy(duration: 0.32)) {
+            editorPresented = true
         }
-        .frame(
-            width: DeskBuddyDesign.contentWidth + (showDeskSidebar ? DeskBuddyDesign.sidebarWidth + 1 : 0),
-            height: 570
-        )
-        .animation(.snappy(duration: 0.28), value: showDeskSidebar)
-        .sheet(item: $editingPreset) { preset in
-            PresetEditorView(preset: preset, currentHeight: controller.heightCm) {
-                settings.updatePreset($0)
-            }
+    }
+
+    private func createPreset() {
+        PresetEditorModel.shared.beginCreating(currentHeight: controller.heightCm)
+        withAnimation(.snappy(duration: 0.32)) {
+            editorPresented = true
         }
-        .sheet(isPresented: $creatingPreset) {
-            PresetEditorView(preset: nil, currentHeight: controller.heightCm) {
-                settings.presets.append($0)
-            }
+    }
+
+    private func closeEditor() {
+        withAnimation(.snappy(duration: 0.32)) {
+            editorPresented = false
+        }
+    }
+
+    private func saveEditor() {
+        PresetEditorModel.shared.commit()
+        closeEditor()
+    }
+
+    private func setSidebarVisible(_ visible: Bool) {
+        guard visible != sidebarVisible else { return }
+        withAnimation(.snappy(duration: 0.28)) {
+            sidebarVisible = visible
         }
     }
 
@@ -46,33 +64,48 @@ struct MenuContentView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if controller.state.isConnected {
-                connectedContent
-            } else {
-                disconnectedContent
+            ZStack {
+                if editorPresented {
+                    PresetEditorView(onCancel: closeEditor, onSave: saveEditor)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                } else if controller.state.isConnected {
+                    connectedContent
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                } else {
+                    disconnectedContent
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                }
             }
+            .frame(maxHeight: .infinity)
+            .clipped()
         }
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Button {
-                showDeskSidebar.toggle()
+                setSidebarVisible(!sidebarVisible)
             } label: {
                 Image(systemName: "sidebar.leading")
                     .font(.system(size: 15, weight: .semibold))
                     .frame(width: 28, height: 28)
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.glass(.regular.tint(DeskBuddyDesign.trayGlassTint)))
             .help("Desks")
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(connectedDeskName)
-                    .font(.headline)
-                    .lineLimit(1)
+            Text(connectedDeskName)
+                .font(.headline)
+                .lineLimit(1)
+
+            if controller.state.isConnected {
+                Circle()
+                    .fill(DeskBuddyDesign.connected)
+                    .frame(width: 7, height: 7)
+                    .help(controller.state.title)
+            } else {
                 Text(controller.state.title)
                     .font(.caption2)
-                    .foregroundStyle(controller.state.isConnected ? DeskBuddyDesign.connected : .secondary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
 
@@ -80,22 +113,22 @@ struct MenuContentView: View {
 
             Button {
                 NSApplication.shared.activate(ignoringOtherApps: true)
-                openWindow(id: "settings")
+                openSettings()
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 15, weight: .semibold))
                     .frame(width: 28, height: 28)
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.glass(.regular.tint(DeskBuddyDesign.trayGlassTint)))
             .help("Settings")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 
     private var connectedContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
                 if coach.pendingMovement != nil {
                     countdownBanner
                 }
@@ -104,7 +137,8 @@ struct MenuContentView: View {
 
                 HStack {
                     Text("Saved Positions")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
                     Spacer()
                     if controller.isMoving {
                         Button("Stop", systemImage: "stop.fill") {
@@ -112,18 +146,28 @@ struct MenuContentView: View {
                         }
                         .buttonStyle(.glass(.regular.tint(.red)))
                         .controlSize(.small)
+                    } else {
+                        Button {
+                            createPreset()
+                        } label: {
+                            Image(systemName: "plus")
+                                .frame(width: 22, height: 22)
+                        }
+                        .buttonStyle(.glass(.regular.tint(DeskBuddyDesign.trayGlassTint)))
+                        .controlSize(.small)
+                        .help("Add Position")
                     }
                 }
 
                 presetGrid
             }
-            .padding(16)
+            .padding(14)
         }
         .scrollIndicators(.never)
     }
 
     private var heightControls: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: 14) {
             PressAndHoldButton(
                 title: "Move down",
                 systemImage: "arrow.down",
@@ -135,8 +179,11 @@ struct MenuContentView: View {
 
             VStack(spacing: 2) {
                 Text(controller.heightCm.map(settings.formattedHeight) ?? "–")
-                    .font(.system(size: 36, weight: .bold, design: .rounded))
+                    .font(.system(size: 40, weight: .bold, design: .rounded))
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .fixedSize(horizontal: true, vertical: false)
                     .contentTransition(.numericText())
                 if abs(controller.speedCmPerSecond) > 0.1 {
                     Text(controller.speedCmPerSecond > 0 ? "Moving up" : "Moving down")
@@ -154,41 +201,26 @@ struct MenuContentView: View {
                 controller: controller
             )
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
     }
 
     private var presetGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
             ForEach(settings.presets) { preset in
                 presetCard(preset)
             }
-
-            Button {
-                creatingPreset = true
-            } label: {
-                VStack(spacing: 7) {
-                    Image(systemName: "plus")
-                        .font(.title3.weight(.semibold))
-                    Text("Add")
-                        .font(.subheadline.weight(.medium))
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 100)
-            }
-            .buttonStyle(.glass)
         }
     }
 
     private func presetCard(_ preset: DeskPreset) -> some View {
-        Button {
-            controller.move(to: preset)
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: preset.symbol)
-                    .font(.title3)
-                    .frame(width: 30)
-                VStack(alignment: .leading, spacing: 3) {
+        ZStack(alignment: .topTrailing) {
+            Button {
+                controller.move(to: preset)
+            } label: {
+                VStack(spacing: 5) {
+                    Image(systemName: preset.symbol)
+                        .font(.title3)
                     Text(preset.name)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
@@ -197,17 +229,38 @@ struct MenuContentView: View {
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                Spacer(minLength: 0)
+                .frame(maxWidth: .infinity)
+                .frame(height: 104)
+                .contentShape(RoundedRectangle(cornerRadius: DeskBuddyDesign.cornerRadius))
             }
-            .padding(.horizontal, 14)
-            .frame(maxWidth: .infinity)
-            .frame(height: 100)
-            .contentShape(RoundedRectangle(cornerRadius: DeskBuddyDesign.cornerRadius))
+            .buttonStyle(.plain)
+
+            if hoveredPresetID == preset.id {
+                Button {
+                    editPreset(preset)
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.glass(.regular.tint(.accentColor)))
+                .controlSize(.small)
+                .padding(6)
+                .transition(.scale.combined(with: .opacity))
+                .help("Edit \(preset.name)")
+            }
         }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: DeskBuddyDesign.cornerRadius))
+        .glassEffect(
+            .regular.tint(DeskBuddyDesign.trayGlassTint).interactive(),
+            in: RoundedRectangle(cornerRadius: DeskBuddyDesign.cornerRadius)
+        )
+        .onHover { isHovered in
+            withAnimation(.easeOut(duration: 0.16)) {
+                hoveredPresetID = isHovered ? preset.id : nil
+            }
+        }
         .contextMenu {
-            Button("Edit", systemImage: "pencil") { editingPreset = preset }
+            Button("Edit", systemImage: "pencil") { editPreset(preset) }
             Button("Update with Current Height", systemImage: "scope") {
                 guard let height = controller.heightCm else { return }
                 var updated = preset
@@ -215,8 +268,12 @@ struct MenuContentView: View {
                 settings.updatePreset(updated)
             }
             Divider()
-            Button("Move Left", systemImage: "arrow.left") { settings.movePreset(preset, offset: -1) }
-            Button("Move Right", systemImage: "arrow.right") { settings.movePreset(preset, offset: 1) }
+            Button("Move Left", systemImage: "arrow.left") {
+                settings.movePreset(preset, offset: -1)
+            }
+            Button("Move Right", systemImage: "arrow.right") {
+                settings.movePreset(preset, offset: 1)
+            }
             if preset.resolvedKind == .custom {
                 Divider()
                 Button("Delete", systemImage: "trash", role: .destructive) { settings.deletePreset(preset) }
@@ -260,7 +317,7 @@ struct MenuContentView: View {
                     .multilineTextAlignment(.center)
             }
             Button("Open Desks", systemImage: "sidebar.leading") {
-                showDeskSidebar = true
+                setSidebarVisible(true)
             }
             .buttonStyle(.glass(.regular.tint(.accentColor)))
             Spacer()
@@ -269,75 +326,91 @@ struct MenuContentView: View {
     }
 
     private var deskSidebar: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Desks")
-                .font(.headline)
+        VStack(spacing: 0) {
+            HStack {
+                Text("Desks")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    setSidebarVisible(false)
+                } label: {
+                    Image(systemName: "xmark")
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.glass(.regular.tint(DeskBuddyDesign.trayGlassTint)))
+                .help("Close Desks")
+            }
+            .padding(14)
 
-            ScrollView {
-                VStack(spacing: 10) {
+            List(selection: deskSelection) {
+                Section {
                     ForEach(availableDesks) { desk in
-                        GlassCard(
-                            tint: desk.id == controller.connectedDeskID ? .green.opacity(0.22) : nil,
-                            interactive: true
-                        ) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Image(systemName: "table.furniture")
-                                        .foregroundStyle(desk.id == controller.connectedDeskID ? .green : .secondary)
-                                    Text(desk.name).font(.subheadline.weight(.semibold))
-                                    Spacer()
-                                }
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(desk.name)
+                                    .font(.subheadline.weight(.semibold))
                                 if desk.id == controller.connectedDeskID {
-                                    HStack {
-                                        Label("Connected", systemImage: "checkmark.circle.fill")
-                                            .foregroundStyle(.green)
-                                        Spacer()
-                                        Button("Disconnect") { controller.disconnect() }
-                                            .buttonStyle(.glass)
-                                            .controlSize(.small)
-                                    }
-                                    .font(.caption)
-                                } else {
-                                    Button("Connect") { controller.connect(to: desk) }
-                                        .buttonStyle(.glass)
-                                        .controlSize(.small)
+                                    Text("Connected")
+                                        .font(.caption2)
+                                        .foregroundStyle(DeskBuddyDesign.connected)
                                 }
                             }
-                            .padding(12)
+                        } icon: {
+                            Image(systemName: "table.furniture")
+                                .foregroundStyle(
+                                    desk.id == controller.connectedDeskID ? DeskBuddyDesign.connected : .secondary
+                                )
+                        }
+                        .tag(desk.id)
+                        .contextMenu {
+                            if desk.id == controller.connectedDeskID {
+                                Button("Disconnect", systemImage: "xmark.circle") { controller.disconnect() }
+                            } else {
+                                Button("Connect", systemImage: "link") { controller.connect(to: desk) }
+                            }
                         }
                     }
                 }
             }
-            .scrollIndicators(.never)
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
 
-            Button(controller.state == .scanning ? "Scanning …" : "Search for New Desks", systemImage: "magnifyingglass") {
-                controller.scan()
-            }
-            .buttonStyle(.glass(.regular.tint(.accentColor)))
-            .disabled(controller.state == .scanning)
-
-            DisclosureGroup("Diagnostics", isExpanded: $showingDiagnostics) {
-                Text(controller.diagnosticsText)
-                    .font(.system(size: 9, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Copy") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(controller.diagnosticsText, forType: .string)
+            VStack(alignment: .leading, spacing: 10) {
+                Button(controller.isScanning ? "Searching …" : "Find Desks", systemImage: "magnifyingglass") {
+                    controller.scan()
                 }
-                .controlSize(.small)
-            }
-            .font(.caption)
+                .buttonStyle(.glass(.regular.tint(DeskBuddyDesign.trayGlassTint)))
+                .disabled(controller.isScanning)
 
-            Divider()
-            Button("Quit DeskBuddy", systemImage: "power") {
-                NSApplication.shared.terminate(nil)
+                if controller.connectedDeskID != nil {
+                    Button("Disconnect", systemImage: "xmark.circle") {
+                        controller.disconnect()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
+
+                Divider()
+                Button("Quit DeskBuddy", systemImage: "power") {
+                    NSApplication.shared.terminate(nil)
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .padding(14)
         }
-        .padding(16)
+    }
+
+    private var deskSelection: Binding<UUID?> {
+        Binding(
+            get: { controller.connectedDeskID },
+            set: { selectedID in
+                guard let selectedID,
+                      let desk = availableDesks.first(where: { $0.id == selectedID }) else { return }
+                controller.connect(to: desk)
+            }
+        )
     }
 
     private var connectedDeskName: String {
@@ -354,93 +427,5 @@ struct MenuContentView: View {
             result.append(desk)
         }
         return result
-    }
-}
-
-private struct PresetEditorView: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var draft: DeskPreset
-    let onSave: (DeskPreset) -> Void
-
-    private let symbols = [
-        "chair", "figure.stand", "arrow.down.to.line", "arrow.up.to.line",
-        "figure.walk", "laptopcomputer", "cup.and.saucer", "star"
-    ]
-
-    init(preset: DeskPreset?, currentHeight: Double?, onSave: @escaping (DeskPreset) -> Void) {
-        let initial = preset ?? DeskPreset(
-            name: "New Position",
-            heightCm: currentHeight ?? 90,
-            symbol: "star",
-            kind: .custom
-        )
-        _draft = State(initialValue: initial)
-        self.onSave = onSave
-    }
-
-    var body: some View {
-        VStack(spacing: 18) {
-            HStack {
-                Button("Cancel", systemImage: "xmark") { dismiss() }
-                    .buttonStyle(.glass)
-                Spacer()
-                Text("Saved Position").font(.headline)
-                Spacer()
-                Button("Done", systemImage: "checkmark") {
-                    onSave(draft)
-                    dismiss()
-                }
-                .buttonStyle(.glass(.regular.tint(.accentColor)))
-                .disabled(draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-
-            HStack(spacing: 14) {
-                Menu {
-                    ForEach(symbols, id: \.self) { symbol in
-                        Button { draft.symbol = symbol } label: {
-                            Label(symbol, systemImage: symbol)
-                        }
-                    }
-                } label: {
-                    Image(systemName: draft.symbol)
-                        .font(.title)
-                        .frame(width: 62, height: 62)
-                }
-                .menuStyle(.borderlessButton)
-                .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 16))
-
-                VStack(spacing: 10) {
-                    TextField("Name", text: $draft.name)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("Height", value: $draft.heightCm, format: .number.precision(.fractionLength(1)))
-                        .textFieldStyle(.roundedBorder)
-                }
-            }
-
-            GlassCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Height")
-                        Spacer()
-                        Text(String(format: "%.1f cm", draft.heightCm)).monospacedDigit()
-                    }
-                    Slider(
-                        value: $draft.heightCm,
-                        in: DeskProtocol.minimumHeightCm...DeskProtocol.maximumHeightCm,
-                        step: 0.1
-                    )
-                    HStack {
-                        Text("62 cm")
-                        Spacer()
-                        Text("127 cm")
-                    }
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                }
-                .padding(14)
-            }
-        }
-        .padding(18)
-        .frame(width: 410)
     }
 }

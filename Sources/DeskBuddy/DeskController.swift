@@ -13,6 +13,7 @@ final class DeskController: NSObject, ObservableObject {
     @Published private(set) var speedCmPerSecond: Double = 0
     @Published private(set) var targetHeightCm: Double?
     @Published private(set) var isMoving = false
+    @Published private(set) var isScanning = false
     @Published private(set) var connectedDeskID: UUID?
     @Published private(set) var diagnosticEvents: [String] = []
 
@@ -53,29 +54,45 @@ final class DeskController: NSObject, ObservableObject {
         discoveredDesks = []
         discoveredPeripherals = [:]
         record("Scan started")
-        state = .scanning
+        isScanning = true
+        state = activeConnectionState ?? .scanning
         central.scanForPeripherals(
             withServices: [CBUUID(string: DeskProtocol.advertisedService)],
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
         )
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(12))
-            if case .scanning = self.state {
+            if self.isScanning {
                 self.central.stopScan()
-                self.state = self.discoveredDesks.isEmpty
-                    ? .failed("No compatible desk found")
-                    : .idle
+                self.isScanning = false
+                self.state = self.activeConnectionState
+                    ?? (self.discoveredDesks.isEmpty ? .failed("No compatible desk found") : .idle)
             }
         }
     }
 
     func stopScan() {
         central.stopScan()
-        if case .scanning = state { state = .idle }
+        isScanning = false
+        if case .scanning = state { state = activeConnectionState ?? .idle }
+    }
+
+    private var activeConnectionState: ConnectionState? {
+        guard setupComplete,
+              peripheral?.state == .connected,
+              let connectedDeskID else { return nil }
+        let name = settings.savedDesks.first(where: { $0.id == connectedDeskID })?.name
+            ?? peripheral?.name
+            ?? "IDÅSEN Desk"
+        return .connected(name)
     }
 
     func connect(to desk: SavedDesk) {
         stopScan()
+        if desk.id == connectedDeskID, let activeConnectionState {
+            state = activeConnectionState
+            return
+        }
         guard let candidate = discoveredPeripherals[desk.id]
             ?? central.retrievePeripherals(withIdentifiers: [desk.id]).first else {
             record("Desk is no longer in the Bluetooth cache")
@@ -108,15 +125,48 @@ final class DeskController: NSObject, ObservableObject {
         diagnosticEvents.joined(separator: "\n")
     }
 
+    var diagnosticsReport: String {
+        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"
+        let buildNumber = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
+        let deskIdentifier = connectedDeskID.map { String($0.uuidString.prefix(8)) } ?? "None"
+        let height = heightCm.map { String(format: "%.1f cm", $0) } ?? "Unavailable"
+        let generatedAt = ISO8601DateFormatter().string(from: Date())
+        return """
+        DeskBuddy Diagnostics
+        Generated: \(generatedAt)
+
+        App: \(appVersion) (\(buildNumber))
+        macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)
+        State: \(state.title)
+        Scanning: \(isScanning ? "Yes" : "No")
+        Connected desk: \(deskIdentifier)
+        Bluetooth manager state: \(central.state.rawValue)
+        Peripheral state: \(peripheral?.state.rawValue.description ?? "None")
+        Setup complete: \(setupComplete ? "Yes" : "No")
+        Command characteristic: \(commandCharacteristic == nil ? "Missing" : "Ready")
+        Height characteristic: \(heightCharacteristic == nil ? "Missing" : "Ready")
+        Reference characteristic: \(referenceCharacteristic == nil ? "Missing" : "Ready")
+        Height: \(height)
+        Speed: \(String(format: "%.2f cm/s", speedCmPerSecond))
+        Moving: \(isMoving ? "Yes" : "No")
+
+        Event Log
+        ---------
+        \(diagnosticsText.isEmpty ? "No diagnostic events recorded." : diagnosticsText)
+        """
+    }
+
     func startManual(_ direction: ManualDirection) {
         guard state.isConnected, commandCharacteristic != nil else { return }
         stopTimers(sendStop: false)
         manualDirection = direction
         isMoving = true
         sendManualCommand()
-        manualTimer = Timer.scheduledTimer(withTimeInterval: 0.55, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.55, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.sendManualCommand() }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        manualTimer = timer
     }
 
     func stopMovement() {
@@ -141,9 +191,11 @@ final class DeskController: NSObject, ObservableObject {
         write(DeskProtocol.stop, to: commandCharacteristic, withResponse: true)
         write(payload, to: referenceCharacteristic, withResponse: true)
 
-        targetTimer = Timer.scheduledTimer(withTimeInterval: 0.10, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.10, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.continueTargetMovement() }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        targetTimer = timer
     }
 
     func move(to preset: DeskPreset) {
@@ -294,7 +346,7 @@ final class DeskController: NSObject, ObservableObject {
         formatter.dateFormat = "HH:mm:ss"
         let line = "\(formatter.string(from: Date()))  \(message)"
         diagnosticEvents.append(line)
-        if diagnosticEvents.count > 40 { diagnosticEvents.removeFirst(diagnosticEvents.count - 40) }
+        if diagnosticEvents.count > 200 { diagnosticEvents.removeFirst(diagnosticEvents.count - 200) }
         logger.info("\(message, privacy: .public)")
     }
 
@@ -337,8 +389,7 @@ final class DeskController: NSObject, ObservableObject {
            now.timeIntervalSince(previous) <= 1.4 {
             lastHardwareTapAt = nil
             lastHardwareTapDirection = nil
-            let targetKind: PresetKind = finishedDirection == .up ? .standing : .sitting
-            if let preset = SettingsStore.shared.presets.first(where: { $0.resolvedKind == targetKind }) {
+            if let preset = settings.doubleTapPreset(for: finishedDirection) {
                 record("Double tap detected: \(preset.name)")
                 move(to: preset)
             }
@@ -358,6 +409,8 @@ extension DeskController: @preconcurrency CBCentralManagerDelegate {
             restoreLastDeskIfPossible()
         case .poweredOff, .unauthorized, .unsupported:
             record("Bluetooth unavailable (state \(central.state.rawValue))")
+            central.stopScan()
+            isScanning = false
             clearConnection()
             state = .bluetoothOff
         default:

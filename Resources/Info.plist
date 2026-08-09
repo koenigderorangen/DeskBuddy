@@ -32,5 +32,9 @@
     <string>DeskBuddy uses Bluetooth to connect to and control your height-adjustable desk.</string>
     <key>NSUserNotificationUsageDescription</key>
     <string>Notifications remind you to alternate between sitting and standing.</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/koenigderorangen/DeskBuddy/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>/1bPT2s72k/BYes+5RSxBMYm0HlZUlYoqFCG7Taqqc4=</string>
 </dict>
 </plist>

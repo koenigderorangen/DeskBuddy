@@ -1,4 +1,5 @@
 import Carbon
+import Combine
 import Foundation
 
 @MainActor
@@ -7,11 +8,19 @@ final class GlobalShortcutCenter {
 
     private var eventHandler: EventHandlerRef?
     private var hotKeyRefs: [EventHotKeyRef?] = []
+    private var cancellables = Set<AnyCancellable>()
     private let signature: OSType = 0x4F44434B // ODCK
 
     private init() {
         installHandler()
-        registerDefaults()
+        reload()
+        Publishers.CombineLatest(
+            SettingsStore.shared.$shortcuts,
+            SettingsStore.shared.$disabledShortcutActions
+        )
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _ in self?.reload() }
+            .store(in: &cancellables)
     }
 
     private func installHandler() {
@@ -49,18 +58,23 @@ final class GlobalShortcutCenter {
         }
     }
 
-    private func registerDefaults() {
-        // Ctrl-Option-1: first preset, Ctrl-Option-2: second preset, Ctrl-Option-0: stop.
-        register(id: 1, keyCode: 18)
-        register(id: 2, keyCode: 19)
-        register(id: 3, keyCode: 29)
-        register(id: 4, keyCode: 126)
-        register(id: 5, keyCode: 125)
+    func reload() {
+        suspend()
+        for action in ShortcutAction.allCases where SettingsStore.shared.shortcutIsEnabled(action) {
+            let shortcut = SettingsStore.shared.shortcut(for: action)
+            register(id: action.hotKeyID, keyCode: shortcut.keyCode, modifiers: shortcut.modifiers)
+        }
     }
 
-    private func register(id: UInt32, keyCode: UInt32) {
+    func suspend() {
+        for reference in hotKeyRefs where reference != nil {
+            UnregisterEventHotKey(reference)
+        }
+        hotKeyRefs.removeAll()
+    }
+
+    private func register(id: UInt32, keyCode: UInt32, modifiers: UInt32) {
         var reference: EventHotKeyRef?
-        let modifiers = UInt32(controlKey | optionKey)
         let hotKeyID = EventHotKeyID(signature: signature, id: id)
         if RegisterEventHotKey(
             keyCode,

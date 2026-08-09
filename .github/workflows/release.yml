@@ -35,15 +35,47 @@ jobs:
         env:
           DESKBUDDY_VERSION: ${{ steps.version.outputs.version }}
           DESKBUDDY_BUILD_NUMBER: ${{ github.run_number }}
-        run: ./build-app.sh
+          SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$SPARKLE_PUBLIC_KEY" || -z "$SPARKLE_PRIVATE_KEY" ]]; then
+            echo "SPARKLE_PUBLIC_KEY and SPARKLE_PRIVATE_KEY repository secrets are required." >&2
+            exit 1
+          fi
+          ./build-app.sh
 
-      - name: Create release archive
+      - name: Package app as DMG
         if: steps.version.outputs.should_release == 'true'
-        run: ditto -c -k --sequesterRsrc --keepParent outputs/DeskBuddy.app "DeskBuddy-${{ steps.version.outputs.version }}.zip"
+        run: |
+          STAGING="$(mktemp -d)"
+          cp -R "outputs/DeskBuddy.app" "$STAGING/DeskBuddy.app"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create \
+            -volname "DeskBuddy ${{ steps.version.outputs.version }}" \
+            -srcfolder "$STAGING" \
+            -ov -format UDZO \
+            "DeskBuddy-${{ steps.version.outputs.version }}.dmg"
 
       - name: Generate release notes
         if: steps.version.outputs.should_release == 'true'
         run: ./scripts/release-notes.sh "${{ steps.version.outputs.version }}" release-notes.md
+
+      - name: Generate signed Sparkle appcast
+        if: steps.version.outputs.should_release == 'true'
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          mkdir sparkle-release
+          cp "DeskBuddy-${{ steps.version.outputs.version }}.dmg" sparkle-release/
+          cp release-notes.md "sparkle-release/DeskBuddy-${{ steps.version.outputs.version }}.md"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | \
+            .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
+              --ed-key-file - \
+              --download-url-prefix "https://github.com/koenigderorangen/DeskBuddy/releases/download/${{ steps.version.outputs.tag }}/" \
+              --link "https://github.com/koenigderorangen/DeskBuddy" \
+              --embed-release-notes \
+              -o sparkle-release/appcast.xml \
+              sparkle-release
 
       - name: Publish GitHub Release
         if: steps.version.outputs.should_release == 'true'
@@ -51,7 +83,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh release create "${{ steps.version.outputs.tag }}"
-          "DeskBuddy-${{ steps.version.outputs.version }}.zip"
+          "DeskBuddy-${{ steps.version.outputs.version }}.dmg"
+          "sparkle-release/appcast.xml"
           --target "$GITHUB_SHA"
           --title "DeskBuddy ${{ steps.version.outputs.version }}"
           --notes-file release-notes.md

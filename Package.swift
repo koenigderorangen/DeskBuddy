@@ -7,10 +7,19 @@ let package = Package(
     products: [
         .executable(name: "DeskBuddy", targets: ["DeskBuddy"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.5")
+    ],
     targets: [
         .executableTarget(
             name: "DeskBuddy",
-            path: "Sources/DeskBuddy"
+            dependencies: [
+                .product(name: "Sparkle", package: "Sparkle")
+            ],
+            path: "Sources/DeskBuddy",
+            linkerSettings: [
+                .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])
+            ]
         ),
         .testTarget(
             name: "DeskBuddyTests",

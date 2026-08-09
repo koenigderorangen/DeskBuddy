@@ -14,7 +14,7 @@ struct PressAndHoldButton: View {
             .contentShape(Circle())
             .glassEffect(
                 Glass.regular
-                    .tint(pressed ? Color.accentColor.opacity(0.55) : nil)
+                    .tint(pressed ? Color.accentColor.opacity(0.55) : DeskBuddyDesign.trayGlassTint)
                     .interactive(),
                 in: Circle()
             )

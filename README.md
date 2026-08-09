@@ -40,4 +40,19 @@ The implementation uses the publicly documented LINAK/IDÅSEN GATT protocol. It 
 
 ## Releases
 
-Pull requests run the Swift test suite on GitHub’s macOS 26 runner. On `main`, Conventional Commits determine the next version, run the tests again, build the app, and publish it as a ZIP archive in a GitHub Release. See [CONTRIBUTING.md](CONTRIBUTING.md) for the supported commit types.
+Pull requests run the Swift test suite on GitHub’s macOS 26 runner. On `main`, Conventional Commits determine the next version, run the tests again, build the app, and publish a DMG in a GitHub Release. Sparkle uses the release's signed `appcast.xml` to deliver automatic updates. Release builds require matching `SPARKLE_PUBLIC_KEY` and `SPARKLE_PRIVATE_KEY` repository secrets generated with Sparkle's `generate_keys` tool. See [CONTRIBUTING.md](CONTRIBUTING.md) for the supported commit types.
+
+Configure Sparkle signing once after resolving package dependencies:
+
+```sh
+SPARKLE_TOOLS=.build/artifacts/sparkle/Sparkle/bin
+"$SPARKLE_TOOLS/generate_keys" --account DeskBuddy
+"$SPARKLE_TOOLS/generate_keys" --account DeskBuddy -p | gh secret set SPARKLE_PUBLIC_KEY
+PRIVATE_KEY_DIR="$(mktemp -d)"
+PRIVATE_KEY_FILE="$PRIVATE_KEY_DIR/sparkle-private-key"
+"$SPARKLE_TOOLS/generate_keys" --account DeskBuddy -x "$PRIVATE_KEY_FILE"
+gh secret set SPARKLE_PRIVATE_KEY < "$PRIVATE_KEY_FILE"
+rm -rf "$PRIVATE_KEY_DIR"
+```
+
+Keep the private key backed up securely. Losing it prevents existing installations from trusting future updates.

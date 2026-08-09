@@ -24,6 +24,10 @@ final class SettingsStore: ObservableObject {
     @Published var activeWeekdays: Set<Int> { didSet { save(activeWeekdays, key: Keys.activeWeekdays) } }
     @Published var movementCountdownSeconds: Int { didSet { defaults.set(movementCountdownSeconds, forKey: Keys.countdown) } }
     @Published var doubleTapEnabled: Bool { didSet { defaults.set(doubleTapEnabled, forKey: Keys.doubleTap) } }
+    @Published var doubleTapDownPresetID: UUID { didSet { defaults.set(doubleTapDownPresetID.uuidString, forKey: Keys.doubleTapDownPreset) } }
+    @Published var doubleTapUpPresetID: UUID { didSet { defaults.set(doubleTapUpPresetID.uuidString, forKey: Keys.doubleTapUpPreset) } }
+    @Published var shortcuts: [String: KeyboardShortcut] { didSet { save(shortcuts, key: Keys.shortcutsConfig) } }
+    @Published var disabledShortcutActions: Set<String> { didSet { save(disabledShortcutActions, key: Keys.disabledShortcuts) } }
 
     private let defaults = UserDefaults.standard
 
@@ -47,6 +51,10 @@ final class SettingsStore: ObservableObject {
         static let activeWeekdays = "activeWeekdays"
         static let countdown = "movementCountdownSeconds"
         static let doubleTap = "doubleTapEnabled"
+        static let doubleTapDownPreset = "doubleTapDownPresetID"
+        static let doubleTapUpPreset = "doubleTapUpPresetID"
+        static let shortcutsConfig = "shortcutsConfig"
+        static let disabledShortcuts = "disabledShortcuts"
         static let englishPresetNamesMigrated = "englishPresetNamesMigrated"
     }
 
@@ -91,6 +99,16 @@ final class SettingsStore: ObservableObject {
         activeWeekdays = Self.load(Set<Int>.self, key: Keys.activeWeekdays) ?? Set(2...6)
         movementCountdownSeconds = defaults.object(forKey: Keys.countdown) as? Int ?? 15
         doubleTapEnabled = defaults.bool(forKey: Keys.doubleTap)
+        let storedDownPresetID = defaults.string(forKey: Keys.doubleTapDownPreset).flatMap(UUID.init(uuidString:))
+        doubleTapDownPresetID = storedDownPresetID.flatMap { selectedID in
+            loadedPresets.contains(where: { $0.id == selectedID }) ? selectedID : nil
+        } ?? loadedPresets.first(where: { $0.resolvedKind == .sitting })!.id
+        let storedUpPresetID = defaults.string(forKey: Keys.doubleTapUpPreset).flatMap(UUID.init(uuidString:))
+        doubleTapUpPresetID = storedUpPresetID.flatMap { selectedID in
+            loadedPresets.contains(where: { $0.id == selectedID }) ? selectedID : nil
+        } ?? loadedPresets.first(where: { $0.resolvedKind == .standing })!.id
+        shortcuts = Self.load([String: KeyboardShortcut].self, key: Keys.shortcutsConfig) ?? [:]
+        disabledShortcutActions = Self.load(Set<String>.self, key: Keys.disabledShortcuts) ?? []
     }
 
     func formattedHeight(_ centimeters: Double) -> String {
@@ -99,6 +117,35 @@ final class SettingsStore: ObservableObject {
             return String(format: "%.*f in", digits, centimeters / 2.54)
         }
         return String(format: "%.*f cm", digits, centimeters)
+    }
+
+    func shortcut(for action: ShortcutAction) -> KeyboardShortcut {
+        shortcuts[action.rawValue] ?? action.defaultShortcut
+    }
+
+    func setShortcut(_ shortcut: KeyboardShortcut, for action: ShortcutAction) {
+        shortcuts[action.rawValue] = shortcut
+        disabledShortcutActions.remove(action.rawValue)
+    }
+
+    func shortcutIsEnabled(_ action: ShortcutAction) -> Bool {
+        !disabledShortcutActions.contains(action.rawValue)
+    }
+
+    func disableShortcut(for action: ShortcutAction) {
+        disabledShortcutActions.insert(action.rawValue)
+    }
+
+    func resetShortcut(for action: ShortcutAction) {
+        shortcuts[action.rawValue] = action.defaultShortcut
+        disabledShortcutActions.remove(action.rawValue)
+    }
+
+    func doubleTapPreset(for direction: ManualDirection) -> DeskPreset? {
+        let selectedID = direction == .up ? doubleTapUpPresetID : doubleTapDownPresetID
+        if let selected = presets.first(where: { $0.id == selectedID }) { return selected }
+        let fallbackKind: PresetKind = direction == .up ? .standing : .sitting
+        return presets.first(where: { $0.resolvedKind == fallbackKind }) ?? presets.first
     }
 
     func updatePreset(_ preset: DeskPreset) {
@@ -111,6 +158,14 @@ final class SettingsStore: ObservableObject {
     func deletePreset(_ preset: DeskPreset) {
         guard preset.resolvedKind == .custom else { return }
         presets.removeAll { $0.id == preset.id }
+        if doubleTapDownPresetID == preset.id,
+           let replacement = presets.first(where: { $0.resolvedKind == .sitting }) ?? presets.first {
+            doubleTapDownPresetID = replacement.id
+        }
+        if doubleTapUpPresetID == preset.id,
+           let replacement = presets.first(where: { $0.resolvedKind == .standing }) ?? presets.first {
+            doubleTapUpPresetID = replacement.id
+        }
     }
 
     func movePreset(_ preset: DeskPreset, offset: Int) {
