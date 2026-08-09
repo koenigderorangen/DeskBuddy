@@ -1,0 +1,57 @@
+name: Version and Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deskbuddy-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Test, Build, and Release
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - name: Check out full repository history
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Run test suite
+        run: swift test --disable-sandbox
+
+      - name: Determine next version from Conventional Commits
+        id: version
+        run: ./scripts/next-version.sh >> "$GITHUB_OUTPUT"
+
+      - name: Build app
+        if: steps.version.outputs.should_release == 'true'
+        env:
+          DESKBUDDY_VERSION: ${{ steps.version.outputs.version }}
+          DESKBUDDY_BUILD_NUMBER: ${{ github.run_number }}
+        run: ./build-app.sh
+
+      - name: Create release archive
+        if: steps.version.outputs.should_release == 'true'
+        run: ditto -c -k --sequesterRsrc --keepParent outputs/DeskBuddy.app "DeskBuddy-${{ steps.version.outputs.version }}.zip"
+
+      - name: Generate release notes
+        if: steps.version.outputs.should_release == 'true'
+        run: ./scripts/release-notes.sh "${{ steps.version.outputs.version }}" release-notes.md
+
+      - name: Publish GitHub Release
+        if: steps.version.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${{ steps.version.outputs.tag }}"
+          "DeskBuddy-${{ steps.version.outputs.version }}.zip"
+          --target "$GITHUB_SHA"
+          --title "DeskBuddy ${{ steps.version.outputs.version }}"
+          --notes-file release-notes.md
