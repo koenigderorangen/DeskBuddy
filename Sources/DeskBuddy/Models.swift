@@ -106,3 +106,40 @@ enum ManualDirection: Equatable {
     case up
     case down
 }
+
+enum HardwareGesture: String, Codable, CaseIterable, Identifiable {
+    case doubleDown
+    case doubleUp
+    case upThenDown
+    case downThenUp
+    case tripleDown
+    case tripleUp
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .doubleDown: "↓ ↓"
+        case .doubleUp: "↑ ↑"
+        case .upThenDown: "↑ ↓"
+        case .downThenUp: "↓ ↑"
+        case .tripleDown: "↓ ↓ ↓"
+        case .tripleUp: "↑ ↑ ↑"
+        }
+    }
+
+    var taps: [ManualDirection] {
+        switch self {
+        case .doubleDown: [.down, .down]
+        case .doubleUp: [.up, .up]
+        case .upThenDown: [.up, .down]
+        case .downThenUp: [.down, .up]
+        case .tripleDown: [.down, .down, .down]
+        case .tripleUp: [.up, .up, .up]
+        }
+    }
+
+    static func matching(_ taps: [ManualDirection]) -> Self? {
+        allCases.first { $0.taps == taps }
+    }
+}

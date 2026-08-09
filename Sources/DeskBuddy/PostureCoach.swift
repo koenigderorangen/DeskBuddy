@@ -43,6 +43,34 @@ final class PostureCoach: ObservableObject {
         evaluate()
     }
 
+    func refreshSchedule() {
+        evaluate()
+    }
+
+#if DEBUG
+    func sendTestNotification() {
+        Task {
+            let center = UNUserNotificationCenter.current()
+            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+            let content = UNMutableNotificationContent()
+            content.title = "DeskBuddy Test Notification"
+            content.body = "Notifications are working in this development build."
+            content.sound = .default
+            try? await center.add(
+                UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+            )
+        }
+    }
+
+    func triggerTestCountdown() {
+        let settings = SettingsStore.shared
+        let targetKind: PresetKind = currentPostureIsSitting() ? .standing : .sitting
+        guard let target = settings.presets.first(where: { $0.resolvedKind == targetKind }) else { return }
+        sendReminder(target: target, includesCountdown: true)
+        startCountdown(to: target, seconds: settings.movementCountdownSeconds)
+    }
+#endif
+
     private func evaluate() {
         let settings = SettingsStore.shared
         guard settings.coachEnabled,

@@ -7,6 +7,11 @@ import OSLog
 final class DeskController: NSObject, ObservableObject {
     static let shared = DeskController()
     static let targetMovementTimeout: TimeInterval = 30
+    static let targetStartupTimeout: TimeInterval = 5
+    static let targetRearmInterval: TimeInterval = 0.8
+    static let hardwareTapMaximumDuration: TimeInterval = 1.3
+    static let hardwareTapInterval: TimeInterval = 1.4
+    static let hardwareGestureSettleDelay: Duration = .milliseconds(400)
 
     @Published private(set) var state: ConnectionState = .idle
     @Published private(set) var discoveredDesks: [SavedDesk] = []
@@ -30,6 +35,11 @@ final class DeskController: NSObject, ObservableObject {
     private var manualTimer: Timer?
     private var targetTimer: Timer?
     private var movementDeadline: Date?
+    private var targetStartupDeadline: Date?
+    private var nextTargetRearmAt: Date?
+    private var targetStartingHeightCm: Double?
+    private var targetMotionStarted = false
+    private var targetRearmCount = 0
     private var manualDirection: ManualDirection?
     private var shouldReconnect = true
     private var hasAttemptedRestore = false
@@ -37,10 +47,16 @@ final class DeskController: NSObject, ObservableObject {
     private var setupComplete = false
     private var connectionWatchdog: Task<Void, Never>?
     private var setupWatchdog: Task<Void, Never>?
+    private var wakeReconnectTask: Task<Void, Never>?
+    private var reconnectDeskAfterWake: SavedDesk?
+    private var systemIsSleeping = false
     private var hardwareMotionStartedAt: Date?
     private var hardwareMotionDirection: ManualDirection?
+    private var hardwareTapSequence: [ManualDirection] = []
     private var lastHardwareTapAt: Date?
-    private var lastHardwareTapDirection: ManualDirection?
+    private var pendingHardwareGesture: HardwareGesture?
+    private var pendingHardwareGestureTask: Task<Void, Never>?
+    private var hardwareGestureMovementTask: Task<Void, Never>?
 
     private override init() {
         super.init()
@@ -56,6 +72,66 @@ final class DeskController: NSObject, ObservableObject {
 
     func startBluetooth() {
         _ = central
+    }
+
+    func systemWillSleep() {
+        systemIsSleeping = true
+        guard settings.autoReconnect,
+                            pendingDesk != nil
+                                || state.isConnected
+                                || peripheral?.state == .connecting
+                                || peripheral?.state == .connected,
+              let deskID = pendingDesk?.id ?? connectedDeskID ?? peripheral?.identifier else {
+            reconnectDeskAfterWake = nil
+            return
+        }
+        reconnectDeskAfterWake = pendingDesk
+            ?? settings.savedDesks.first(where: { $0.id == deskID })
+            ?? SavedDesk(id: deskID, name: peripheral?.name ?? "IDÅSEN Desk")
+        record("System sleep: reconnect armed")
+    }
+
+    func systemDidWake() {
+        systemIsSleeping = false
+        guard settings.autoReconnect, reconnectDeskAfterWake != nil else { return }
+        wakeReconnectTask?.cancel()
+        wakeReconnectTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(1.5))
+            } catch {
+                return
+            }
+            guard let self else { return }
+            self.wakeReconnectTask = nil
+            self.attemptWakeReconnect()
+        }
+    }
+
+    private func attemptWakeReconnect() {
+        guard !systemIsSleeping,
+              settings.autoReconnect,
+              let desk = reconnectDeskAfterWake else { return }
+        guard central.state == .poweredOn else {
+            record("System wake: waiting for Bluetooth")
+            return
+        }
+
+        reconnectDeskAfterWake = nil
+        pendingDesk = nil
+        shouldReconnect = true
+        record("System wake: reconnecting to \(desk.name)")
+        stopScan()
+        if let current = peripheral,
+           current.state == .connected || current.state == .connecting {
+            pendingDesk = desk
+            stopTimers(sendStop: false)
+            state = .connecting(desk.name)
+            central.cancelPeripheralConnection(current)
+        } else {
+            clearConnection()
+            state = .idle
+            connect(to: desk)
+        }
     }
 
     func scan() {
@@ -124,6 +200,9 @@ final class DeskController: NSObject, ObservableObject {
     }
 
     func disconnect() {
+        wakeReconnectTask?.cancel()
+        wakeReconnectTask = nil
+        reconnectDeskAfterWake = nil
         shouldReconnect = false
         pendingDesk = nil
         stopMovement()
@@ -197,11 +276,15 @@ final class DeskController: NSObject, ObservableObject {
 
         stopTimers(sendStop: true)
         targetHeightCm = requestedHeightCm
-        movementDeadline = Date().addingTimeInterval(Self.targetMovementTimeout)
+        let now = Date()
+        movementDeadline = now.addingTimeInterval(Self.targetMovementTimeout)
+        targetStartupDeadline = now.addingTimeInterval(Self.targetStartupTimeout)
+        nextTargetRearmAt = now.addingTimeInterval(Self.targetRearmInterval)
+        targetStartingHeightCm = heightCm
+        targetMotionStarted = false
+        targetRearmCount = 0
         isMoving = true
-        write(DeskProtocol.wake, to: commandCharacteristic, withResponse: true)
-        write(DeskProtocol.stop, to: commandCharacteristic, withResponse: true)
-        write(payload, to: referenceCharacteristic, withResponse: true)
+        armTargetMovement(payload, withResponse: true)
 
         let timer = Timer(timeInterval: 0.10, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.continueTargetMovement() }
@@ -308,12 +391,35 @@ final class DeskController: NSObject, ObservableObject {
             stopMovement()
             return
         }
+        let now = Date()
+        if !targetMotionStarted,
+           let startupDeadline = targetStartupDeadline,
+           now >= startupDeadline {
+            stopMovement()
+            record("Target movement did not start after \(targetRearmCount + 1) activation attempts")
+            return
+        }
         if let deadline = movementDeadline, Date() >= deadline {
             stopMovement()
             record("Target movement timed out before the requested height was reached")
             return
         }
+        if !targetMotionStarted,
+           let nextRearmAt = nextTargetRearmAt,
+           now >= nextRearmAt {
+            targetRearmCount += 1
+            armTargetMovement(payload, withResponse: false)
+            self.nextTargetRearmAt = now.addingTimeInterval(Self.targetRearmInterval)
+            record("Rearmed target movement (attempt \(targetRearmCount + 1))")
+            return
+        }
         write(payload, to: referenceCharacteristic, withResponse: false)
+    }
+
+    private func armTargetMovement(_ payload: Data, withResponse: Bool) {
+        write(DeskProtocol.wake, to: commandCharacteristic, withResponse: withResponse)
+        write(DeskProtocol.stop, to: commandCharacteristic, withResponse: withResponse)
+        write(payload, to: referenceCharacteristic, withResponse: withResponse)
     }
 
     private func sendManualCommand() {
@@ -324,6 +430,7 @@ final class DeskController: NSObject, ObservableObject {
     }
 
     private func stopTimers(sendStop: Bool) {
+        resetHardwareGestureRecognition()
         manualTimer?.invalidate()
         targetTimer?.invalidate()
         manualTimer = nil
@@ -331,6 +438,11 @@ final class DeskController: NSObject, ObservableObject {
         manualDirection = nil
         targetHeightCm = nil
         movementDeadline = nil
+        targetStartupDeadline = nil
+        nextTargetRearmAt = nil
+        targetStartingHeightCm = nil
+        targetMotionStarted = false
+        targetRearmCount = 0
         isMoving = false
         guard sendStop else { return }
         write(DeskProtocol.stop, to: commandCharacteristic, withResponse: false)
@@ -363,9 +475,8 @@ final class DeskController: NSObject, ObservableObject {
     }
 
     private func processHardwareGesture(speed: Double) {
-        guard SettingsStore.shared.doubleTapEnabled, !isMoving else {
-            hardwareMotionStartedAt = nil
-            hardwareMotionDirection = nil
+        guard settings.paddleGesturesEnabled, !isMoving else {
+            resetHardwareGestureRecognition()
             return
         }
 
@@ -378,6 +489,12 @@ final class DeskController: NSObject, ObservableObject {
         }
 
         if let direction, hardwareMotionDirection == nil {
+            hardwareGestureMovementTask?.cancel()
+            hardwareGestureMovementTask = nil
+            if pendingHardwareGesture != nil {
+                pendingHardwareGestureTask?.cancel()
+                pendingHardwareGestureTask = nil
+            }
             hardwareMotionDirection = direction
             hardwareMotionStartedAt = Date()
             return
@@ -390,25 +507,103 @@ final class DeskController: NSObject, ObservableObject {
         hardwareMotionDirection = nil
         hardwareMotionStartedAt = nil
         let now = Date()
-        guard now.timeIntervalSince(startedAt) <= 1.3 else {
-            lastHardwareTapAt = nil
-            lastHardwareTapDirection = nil
+        guard now.timeIntervalSince(startedAt) <= Self.hardwareTapMaximumDuration else {
+            resetHardwareTapSequence()
             return
         }
 
-        if lastHardwareTapDirection == finishedDirection,
-           let previous = lastHardwareTapAt,
-           now.timeIntervalSince(previous) <= 1.4 {
-            lastHardwareTapAt = nil
-            lastHardwareTapDirection = nil
-            if let preset = settings.doubleTapPreset(for: finishedDirection) {
-                record("Double tap detected: \(preset.name)")
-                move(to: preset)
+        registerHardwareTap(finishedDirection, startedAt: startedAt, finishedAt: now)
+    }
+
+    private func registerHardwareTap(
+        _ direction: ManualDirection,
+        startedAt: Date,
+        finishedAt: Date
+    ) {
+        if let previous = lastHardwareTapAt,
+           startedAt.timeIntervalSince(previous) > Self.hardwareTapInterval {
+            let deferredGesture = pendingHardwareGesture
+            resetHardwareTapSequence()
+            if let deferredGesture {
+                performHardwareGesture(deferredGesture)
+                return
             }
-        } else {
-            lastHardwareTapAt = now
-            lastHardwareTapDirection = finishedDirection
         }
+
+        hardwareTapSequence.append(direction)
+        lastHardwareTapAt = finishedAt
+
+        if hardwareTapSequence.count == 2,
+           let gesture = HardwareGesture.matching(hardwareTapSequence) {
+            let tripleGesture: HardwareGesture? = switch gesture {
+            case .doubleDown: .tripleDown
+            case .doubleUp: .tripleUp
+            default: nil
+            }
+            if let tripleGesture, settings.preset(for: tripleGesture) != nil {
+                deferHardwareGesture(gesture)
+            } else {
+                performHardwareGesture(gesture)
+                resetHardwareTapSequence()
+            }
+            return
+        }
+
+        guard hardwareTapSequence.count == 3 else { return }
+        if let gesture = HardwareGesture.matching(hardwareTapSequence) {
+            performHardwareGesture(gesture)
+        } else if let pendingHardwareGesture {
+            performHardwareGesture(pendingHardwareGesture)
+        }
+        resetHardwareTapSequence()
+    }
+
+    private func deferHardwareGesture(_ gesture: HardwareGesture) {
+        pendingHardwareGesture = gesture
+        let expectedSequence = hardwareTapSequence
+        pendingHardwareGestureTask?.cancel()
+        pendingHardwareGestureTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(Self.hardwareTapInterval))
+            } catch {
+                return
+            }
+            guard let self, self.hardwareTapSequence == expectedSequence else { return }
+            self.performHardwareGesture(gesture)
+            self.resetHardwareTapSequence()
+        }
+    }
+
+    private func performHardwareGesture(_ gesture: HardwareGesture) {
+        guard let preset = settings.preset(for: gesture) else { return }
+        record("\(gesture.title) detected: \(preset.name)")
+        hardwareGestureMovementTask?.cancel()
+        hardwareGestureMovementTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: Self.hardwareGestureSettleDelay)
+            } catch {
+                return
+            }
+            guard let self, self.state.isConnected else { return }
+            self.hardwareGestureMovementTask = nil
+            self.move(to: preset)
+        }
+    }
+
+    private func resetHardwareGestureRecognition() {
+        hardwareGestureMovementTask?.cancel()
+        hardwareGestureMovementTask = nil
+        hardwareMotionStartedAt = nil
+        hardwareMotionDirection = nil
+        resetHardwareTapSequence()
+    }
+
+    private func resetHardwareTapSequence() {
+        pendingHardwareGestureTask?.cancel()
+        pendingHardwareGestureTask = nil
+        pendingHardwareGesture = nil
+        hardwareTapSequence = []
+        lastHardwareTapAt = nil
     }
 }
 
@@ -418,7 +613,11 @@ extension DeskController: @preconcurrency CBCentralManagerDelegate {
         case .poweredOn:
             record("Bluetooth is ready")
             state = .idle
-            restoreLastDeskIfPossible()
+            if reconnectDeskAfterWake != nil {
+                attemptWakeReconnect()
+            } else {
+                restoreLastDeskIfPossible()
+            }
         case .poweredOff, .unauthorized, .unsupported:
             record("Bluetooth unavailable (state \(central.state.rawValue))")
             central.stopScan()
@@ -491,6 +690,10 @@ extension DeskController: @preconcurrency CBCentralManagerDelegate {
         connectedDeskID = nil
         setupComplete = false
         state = .idle
+        if systemIsSleeping {
+            record("Reconnect deferred until system wake")
+            return
+        }
         if let nextDesk = pendingDesk {
             pendingDesk = nil
             shouldReconnect = true
@@ -553,11 +756,27 @@ extension DeskController: @preconcurrency CBPeripheralDelegate {
         heightCm = position.heightCm
         speedCmPerSecond = position.speedCmPerSecond
         processHardwareGesture(speed: position.speedCmPerSecond)
+        acknowledgeTargetMotion(with: position)
         if let target = targetHeightCm,
            abs(position.heightCm - target) <= 0.5,
            abs(position.speedCmPerSecond) < 0.5 {
             stopMovement()
         }
+    }
+
+    private func acknowledgeTargetMotion(with position: DeskProtocol.Position) {
+        guard !targetMotionStarted,
+              let target = targetHeightCm,
+              let startingHeight = targetStartingHeightCm else { return }
+        let direction = target - startingHeight
+        let heightDelta = position.heightCm - startingHeight
+        guard abs(heightDelta) >= 0.05,
+              direction * heightDelta > 0,
+              direction * position.speedCmPerSecond > 0 else { return }
+        targetMotionStarted = true
+        targetStartupDeadline = nil
+        nextTargetRearmAt = nil
+        record("Target movement started")
     }
 
     func peripheral(

@@ -33,3 +33,13 @@ import Testing
     #expect(DeskProtocol.commandService == DeskProtocol.advertisedService)
     #expect(DeskProtocol.commandCharacteristic.hasPrefix("99FA0002"))
 }
+
+@Test func matchesPhysicalPaddleGestureSequences() {
+    #expect(HardwareGesture.matching([.down, .down]) == .doubleDown)
+    #expect(HardwareGesture.matching([.up, .up]) == .doubleUp)
+    #expect(HardwareGesture.matching([.up, .down]) == .upThenDown)
+    #expect(HardwareGesture.matching([.down, .up]) == .downThenUp)
+    #expect(HardwareGesture.matching([.down, .down, .down]) == .tripleDown)
+    #expect(HardwareGesture.matching([.up, .up, .up]) == .tripleUp)
+    #expect(HardwareGesture.matching([.up]) == nil)
+}

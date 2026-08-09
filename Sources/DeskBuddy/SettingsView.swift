@@ -41,6 +41,7 @@ struct SettingsView: View {
     @ObservedObject var softwareUpdates: SoftwareUpdateController
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var controller = DeskController.shared
+    @ObservedObject private var coach = PostureCoach.shared
     @AppStorage(SettingsSection.storageKey) private var selectedSection = SettingsSection.general.rawValue
     @State private var launchAtLogin = LoginItemManager.isEnabled
     @State private var loginError: String?
@@ -52,7 +53,7 @@ struct SettingsView: View {
                     .tag(section)
             }
             .toolbar(removing: .sidebarToggle)
-            .navigationSplitViewColumnWidth(min: 170, ideal: 190)
+            .navigationSplitViewColumnWidth(min: 190, ideal: 190, max: 190)
             .safeAreaInset(edge: .bottom) {
                 HStack(spacing: 10) {
                     Image(systemName: "table.furniture")
@@ -107,7 +108,7 @@ struct SettingsView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
 
@@ -118,7 +119,7 @@ struct SettingsView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 settingsControlRow("Unit") {
                     Picker("", selection: $settings.useInches) {
@@ -127,7 +128,7 @@ struct SettingsView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
 
@@ -138,7 +139,7 @@ struct SettingsView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 settingsToggleRow("Automatically reconnect", isOn: $settings.autoReconnect)
                 settingsToggleRow("Launch at login", isOn: $launchAtLogin)
@@ -161,20 +162,17 @@ struct SettingsView: View {
     private var interactionSettings: some View {
         settingsScroll {
             settingsGroup(
-                "Double-Tap Gesture",
-                subtitle: "Tap the physical control twice in one direction to move to the selected saved position."
+                "Physical Paddle Gestures",
+                subtitle: "Use short taps on the desk paddle to move to assigned presets. Triple taps take priority over double taps when both are assigned."
             ) {
-                settingsToggleRow("Enable double-tap gesture", isOn: $settings.doubleTapEnabled)
-                settingsControlRow("Double-tap down") {
-                    presetPicker(selection: $settings.doubleTapDownPresetID)
+                settingsToggleRow("Enable paddle gestures", isOn: $settings.paddleGesturesEnabled)
+                ForEach(HardwareGesture.allCases) { gesture in
+                    settingsControlRow(gesture.title) {
+                        gesturePresetPicker(gesture)
+                    }
+                    .disabled(!settings.paddleGesturesEnabled)
+                    .opacity(settings.paddleGesturesEnabled ? 1 : 0.5)
                 }
-                .disabled(!settings.doubleTapEnabled)
-                .opacity(settings.doubleTapEnabled ? 1 : 0.5)
-                settingsControlRow("Double-tap up") {
-                    presetPicker(selection: $settings.doubleTapUpPresetID)
-                }
-                .disabled(!settings.doubleTapEnabled)
-                .opacity(settings.doubleTapEnabled ? 1 : 0.5)
             }
 
             settingsGroup("Movement Behavior") {
@@ -245,6 +243,18 @@ struct SettingsView: View {
             }
 
             settingsGroup("Intervals") {
+                settingsControlRow("Next reminder in") {
+                    if let pendingMovement = coach.pendingMovement {
+                        Text("\(coach.remainingSeconds) sec to \(pendingMovement.preset.name)")
+                            .monospacedDigit()
+                    } else if let nextReminder = coach.nextReminder {
+                        Text(nextReminder, style: .timer)
+                            .monospacedDigit()
+                    } else {
+                        Text("Not scheduled")
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 intervalRow("Sitting interval", symbol: "chair", value: $settings.sittingIntervalMinutes, range: 10...120)
                 Divider()
                 intervalRow("Standing interval", symbol: "figure.stand", value: $settings.standingIntervalMinutes, range: 5...60)
@@ -290,7 +300,34 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
+
+#if DEBUG
+            settingsGroup(
+                "Developer Testing",
+                subtitle: "These controls are compiled only into development builds."
+            ) {
+                settingsControlRow("Notification") {
+                    Button("Send Test Notification", systemImage: "bell.badge") {
+                        coach.sendTestNotification()
+                    }
+                }
+                settingsControlRow("Automatic movement") {
+                    Button("Trigger Coach Countdown", systemImage: "timer") {
+                        coach.triggerTestCountdown()
+                    }
+                    .disabled(!controller.state.isConnected)
+                }
+            }
+#endif
         }
+    .onChange(of: settings.coachEnabled) { _, _ in coach.refreshSchedule() }
+    .onChange(of: settings.coachReminderEnabled) { _, _ in coach.refreshSchedule() }
+    .onChange(of: settings.automaticMovementEnabled) { _, _ in coach.refreshSchedule() }
+    .onChange(of: settings.sittingIntervalMinutes) { _, _ in coach.refreshSchedule() }
+    .onChange(of: settings.standingIntervalMinutes) { _, _ in coach.refreshSchedule() }
+    .onChange(of: settings.activeStartHour) { _, _ in coach.refreshSchedule() }
+    .onChange(of: settings.activeEndHour) { _, _ in coach.refreshSchedule() }
+    .onChange(of: settings.activeWeekdays) { _, _ in coach.refreshSchedule() }
     }
 
     private var diagnosticsSettings: some View {
@@ -330,7 +367,7 @@ struct SettingsView: View {
 
     private var aboutSettings: some View {
         settingsScroll {
-            settingsGroup("DeskBuddy") {
+            settingsGroup(nil) {
                 HStack(spacing: 14) {
                     Image(systemName: "table.furniture")
                         .font(.system(size: 32, weight: .medium))
@@ -370,12 +407,14 @@ struct SettingsView: View {
     }
 
     private func settingsGroup<Content: View>(
-        _ title: String,
+        _ title: String?,
         subtitle: String? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text(title).font(.headline)
+            if let title {
+                Text(title).font(.headline)
+            }
             GlassCard {
                 VStack(alignment: .leading, spacing: 14, content: content)
                     .padding(16)
@@ -434,10 +473,14 @@ struct SettingsView: View {
         }
     }
 
-    private func presetPicker(selection: Binding<UUID>) -> some View {
-        Picker("", selection: selection) {
+    private func gesturePresetPicker(_ gesture: HardwareGesture) -> some View {
+        Picker("", selection: Binding(
+            get: { settings.presetID(for: gesture) },
+            set: { settings.setPresetID($0, for: gesture) }
+        )) {
+            Text("None").tag(nil as UUID?)
             ForEach(settings.presets) { preset in
-                Label(preset.name, systemImage: preset.symbol).tag(preset.id)
+                Label(preset.name, systemImage: preset.symbol).tag(preset.id as UUID?)
             }
         }
         .labelsHidden()

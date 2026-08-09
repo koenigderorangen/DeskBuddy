@@ -17,7 +17,7 @@
 DeskBuddy keeps everyday desk controls close without turning them into another dashboard. Connect over Bluetooth, see the current height at a glance, and move directly to the position you need.
 
 - **Return to the right height** — Save sitting, standing, minimum, maximum, and custom positions.
-- **Double-tap into position** — Tap the physical paddle twice to move directly to your chosen sitting or standing height.
+- **Double-tap into position** — Tap the physical paddle twice to move directly to a saved height, or assign more presets to alternating and triple taps.
 - **Stay in your flow** — Use global keyboard shortcuts or actions in Apple Shortcuts without opening the menu.
 - **Change posture on time** — Get gentle Posture Coach reminders with an optional cancelable movement countdown.
 - **See what matters** — Show the current height in centimeters or inches directly in the menu bar.
@@ -26,9 +26,9 @@ DeskBuddy keeps everyday desk controls close without turning them into another d
 
 ## Designed Around Your Routine
 
-### Double-tap movement
+### Double-tap and paddle gestures
 
-The IDÅSEN normally requires holding its physical paddle until the desk reaches the desired height. DeskBuddy adds a faster option: double-tap up or down and the desk moves to the saved position assigned to that direction. Both targets remain configurable in Settings.
+The IDÅSEN normally requires holding its physical paddle until the desk reaches the desired height. DeskBuddy adds a faster option: assign saved positions to double up, double down, up then down, down then up, triple up, or triple down. Each sequence remains individually configurable in Settings, and unused gestures can stay unassigned.
 
 ### Quick movement
 
@@ -71,7 +71,15 @@ If the desk moves unexpectedly, use DeskBuddy's red **Stop** button or the physi
 ./build-app.sh
 ```
 
-The app bundle is written to `outputs/DeskBuddy.app`. Development requires Xcode with the macOS 26 SDK and Swift 6.2.
+The app bundle is written to `outputs/DeskBuddy.app`. This command builds the same release configuration used by CI.
+
+To include the development-only notification and Posture Coach testing controls, build with:
+
+```sh
+./build-app.sh --debug
+```
+
+Install the resulting `outputs/DeskBuddy.app` in the same way. Development requires Xcode with the macOS 26 SDK and Swift 6.2.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for verification and commit conventions.
 

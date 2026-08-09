@@ -140,7 +140,7 @@ struct OnboardingView: View {
 
     private var welcomeStep: some View {
         HStack(spacing: 12) {
-            onboardingFeature("Double-tap presets", symbol: "hand.tap")
+            onboardingFeature("Paddle gestures", symbol: "hand.tap")
             onboardingFeature("Menu bar control", symbol: "menubar.rectangle")
             onboardingFeature("Posture reminders", symbol: "figure.mind.and.body")
         }

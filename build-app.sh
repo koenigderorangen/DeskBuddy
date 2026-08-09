@@ -8,6 +8,22 @@ VERSION_FILE="$PROJECT_DIR/VERSION"
 APP_VERSION="${DESKBUDDY_VERSION:-$(tr -d '[:space:]' < "$VERSION_FILE")}"
 BUILD_NUMBER="${DESKBUDDY_BUILD_NUMBER:-1}"
 SPARKLE_PUBLIC_KEY="${SPARKLE_PUBLIC_KEY:-}"
+BUILD_CONFIGURATION="release"
+
+if (( $# > 1 )); then
+  echo "Usage: ./build-app.sh [--debug|--release]" >&2
+  exit 1
+fi
+
+case "${1:-}" in
+  "") ;;
+  --debug) BUILD_CONFIGURATION="debug" ;;
+  --release) ;;
+  *)
+    echo "Usage: ./build-app.sh [--debug|--release]" >&2
+    exit 1
+    ;;
+esac
 
 if [[ ! "$APP_VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]]; then
   echo "Invalid DeskBuddy version: $APP_VERSION" >&2
@@ -23,7 +39,7 @@ export CLANG_MODULE_CACHE_PATH="$PROJECT_DIR/.build/ModuleCache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$PROJECT_DIR/.build/ModuleCache"
 
 cd "$PROJECT_DIR"
-swift build --disable-sandbox -c release
+swift build --disable-sandbox -c "$BUILD_CONFIGURATION"
 
 SPARKLE_FRAMEWORK="$(find "$PROJECT_DIR/.build/artifacts" -path '*/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework' -type d -print -quit)"
 if [[ -z "$SPARKLE_FRAMEWORK" ]]; then
@@ -33,7 +49,7 @@ fi
 
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" "$APP_DIR/Contents/Frameworks"
-cp ".build/release/DeskBuddy" "$APP_DIR/Contents/MacOS/DeskBuddy"
+cp ".build/$BUILD_CONFIGURATION/DeskBuddy" "$APP_DIR/Contents/MacOS/DeskBuddy"
 ditto "$SPARKLE_FRAMEWORK" "$APP_DIR/Contents/Frameworks/Sparkle.framework"
 cp "Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$APP_DIR/Contents/Info.plist"
@@ -51,4 +67,5 @@ xcrun actool "Resources/Assets.xcassets" \
 codesign --force --deep --sign - "$APP_DIR"
 otool -l "$APP_DIR/Contents/MacOS/DeskBuddy" | grep -A2 LC_RPATH | grep -q '@executable_path/../Frameworks'
 codesign --deep --strict --verify "$APP_DIR"
+echo "Built DeskBuddy.app in $BUILD_CONFIGURATION mode"
 echo "$APP_DIR"

@@ -1,14 +1,49 @@
 import AppKit
 import SwiftUI
+import UserNotifications
 
 @MainActor
-final class DeskBuddyAppDelegate: NSObject, NSApplicationDelegate {
+final class DeskBuddyAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
+        let workspaceNotifications = NSWorkspace.shared.notificationCenter
+        workspaceNotifications.addObserver(
+            self,
+            selector: #selector(systemWillSleep),
+            name: NSWorkspace.willSleepNotification,
+            object: nil
+        )
+        workspaceNotifications.addObserver(
+            self,
+            selector: #selector(systemDidWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
         if SettingsStore.shared.hasCompletedOnboarding {
             DeskController.shared.startBluetooth()
         } else {
             OnboardingWindowController.shared.present()
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+    }
+
+    @objc private func systemWillSleep() {
+        DeskController.shared.systemWillSleep()
+    }
+
+    @objc private func systemDidWake() {
+        DeskController.shared.systemDidWake()
+        PostureCoach.shared.refreshSchedule()
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
     }
 }
 

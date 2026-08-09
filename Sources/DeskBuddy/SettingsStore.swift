@@ -23,9 +23,8 @@ final class SettingsStore: ObservableObject {
     @Published var activeEndHour: Int { didSet { defaults.set(activeEndHour, forKey: Keys.activeEndHour) } }
     @Published var activeWeekdays: Set<Int> { didSet { save(activeWeekdays, key: Keys.activeWeekdays) } }
     @Published var movementCountdownSeconds: Int { didSet { defaults.set(movementCountdownSeconds, forKey: Keys.countdown) } }
-    @Published var doubleTapEnabled: Bool { didSet { defaults.set(doubleTapEnabled, forKey: Keys.doubleTap) } }
-    @Published var doubleTapDownPresetID: UUID { didSet { defaults.set(doubleTapDownPresetID.uuidString, forKey: Keys.doubleTapDownPreset) } }
-    @Published var doubleTapUpPresetID: UUID { didSet { defaults.set(doubleTapUpPresetID.uuidString, forKey: Keys.doubleTapUpPreset) } }
+    @Published var paddleGesturesEnabled: Bool { didSet { defaults.set(paddleGesturesEnabled, forKey: Keys.doubleTap) } }
+    @Published var hardwareGesturePresetIDs: [String: UUID] { didSet { save(hardwareGesturePresetIDs, key: Keys.hardwareGesturePresets) } }
     @Published var shortcuts: [String: KeyboardShortcut] { didSet { save(shortcuts, key: Keys.shortcutsConfig) } }
     @Published var disabledShortcutActions: Set<String> { didSet { save(disabledShortcutActions, key: Keys.disabledShortcuts) } }
     @Published var hasCompletedOnboarding: Bool { didSet { defaults.set(hasCompletedOnboarding, forKey: Keys.onboarding) } }
@@ -54,6 +53,8 @@ final class SettingsStore: ObservableObject {
         static let doubleTap = "doubleTapEnabled"
         static let doubleTapDownPreset = "doubleTapDownPresetID"
         static let doubleTapUpPreset = "doubleTapUpPresetID"
+        static let hardwareGesturePresets = "hardwareGesturePresetIDs"
+        static let hardwareGesturesMigrated = "hardwareGesturePresetsMigrated"
         static let shortcutsConfig = "shortcutsConfig"
         static let disabledShortcuts = "disabledShortcuts"
         static let englishPresetNamesMigrated = "englishPresetNamesMigrated"
@@ -100,15 +101,32 @@ final class SettingsStore: ObservableObject {
         activeEndHour = defaults.object(forKey: Keys.activeEndHour) as? Int ?? 18
         activeWeekdays = Self.load(Set<Int>.self, key: Keys.activeWeekdays) ?? Set(2...6)
         movementCountdownSeconds = defaults.object(forKey: Keys.countdown) as? Int ?? 15
-        doubleTapEnabled = defaults.bool(forKey: Keys.doubleTap)
+        paddleGesturesEnabled = defaults.bool(forKey: Keys.doubleTap)
+        let sittingPresetID = loadedPresets.first(where: { $0.resolvedKind == .sitting })!.id
+        let standingPresetID = loadedPresets.first(where: { $0.resolvedKind == .standing })!.id
         let storedDownPresetID = defaults.string(forKey: Keys.doubleTapDownPreset).flatMap(UUID.init(uuidString:))
-        doubleTapDownPresetID = storedDownPresetID.flatMap { selectedID in
+        let doubleDownPresetID = storedDownPresetID.flatMap { selectedID in
             loadedPresets.contains(where: { $0.id == selectedID }) ? selectedID : nil
-        } ?? loadedPresets.first(where: { $0.resolvedKind == .sitting })!.id
+        } ?? sittingPresetID
         let storedUpPresetID = defaults.string(forKey: Keys.doubleTapUpPreset).flatMap(UUID.init(uuidString:))
-        doubleTapUpPresetID = storedUpPresetID.flatMap { selectedID in
+        let doubleUpPresetID = storedUpPresetID.flatMap { selectedID in
             loadedPresets.contains(where: { $0.id == selectedID }) ? selectedID : nil
-        } ?? loadedPresets.first(where: { $0.resolvedKind == .standing })!.id
+        } ?? standingPresetID
+        var gesturePresetIDs = Self.load([String: UUID].self, key: Keys.hardwareGesturePresets) ?? [:]
+        gesturePresetIDs = gesturePresetIDs.filter { _, presetID in
+            loadedPresets.contains(where: { $0.id == presetID })
+        }
+        if !defaults.bool(forKey: Keys.hardwareGesturesMigrated) {
+            gesturePresetIDs[HardwareGesture.doubleDown.rawValue] = gesturePresetIDs[HardwareGesture.doubleDown.rawValue]
+                ?? doubleDownPresetID
+            gesturePresetIDs[HardwareGesture.doubleUp.rawValue] = gesturePresetIDs[HardwareGesture.doubleUp.rawValue]
+                ?? doubleUpPresetID
+            if let data = try? JSONEncoder().encode(gesturePresetIDs) {
+                defaults.set(data, forKey: Keys.hardwareGesturePresets)
+            }
+            defaults.set(true, forKey: Keys.hardwareGesturesMigrated)
+        }
+        hardwareGesturePresetIDs = gesturePresetIDs
         shortcuts = Self.load([String: KeyboardShortcut].self, key: Keys.shortcutsConfig) ?? [:]
         disabledShortcutActions = Self.load(Set<String>.self, key: Keys.disabledShortcuts) ?? []
         hasCompletedOnboarding = defaults.bool(forKey: Keys.onboarding)
@@ -144,11 +162,21 @@ final class SettingsStore: ObservableObject {
         disabledShortcutActions.remove(action.rawValue)
     }
 
-    func doubleTapPreset(for direction: ManualDirection) -> DeskPreset? {
-        let selectedID = direction == .up ? doubleTapUpPresetID : doubleTapDownPresetID
-        if let selected = presets.first(where: { $0.id == selectedID }) { return selected }
-        let fallbackKind: PresetKind = direction == .up ? .standing : .sitting
-        return presets.first(where: { $0.resolvedKind == fallbackKind }) ?? presets.first
+    func presetID(for gesture: HardwareGesture) -> UUID? {
+        hardwareGesturePresetIDs[gesture.rawValue]
+    }
+
+    func preset(for gesture: HardwareGesture) -> DeskPreset? {
+        guard let selectedID = presetID(for: gesture) else { return nil }
+        return presets.first(where: { $0.id == selectedID })
+    }
+
+    func setPresetID(_ presetID: UUID?, for gesture: HardwareGesture) {
+        if let presetID {
+            hardwareGesturePresetIDs[gesture.rawValue] = presetID
+        } else {
+            hardwareGesturePresetIDs.removeValue(forKey: gesture.rawValue)
+        }
     }
 
     func updatePreset(_ preset: DeskPreset) {
@@ -161,13 +189,15 @@ final class SettingsStore: ObservableObject {
     func deletePreset(_ preset: DeskPreset) {
         guard preset.resolvedKind == .custom else { return }
         presets.removeAll { $0.id == preset.id }
-        if doubleTapDownPresetID == preset.id,
-           let replacement = presets.first(where: { $0.resolvedKind == .sitting }) ?? presets.first {
-            doubleTapDownPresetID = replacement.id
-        }
-        if doubleTapUpPresetID == preset.id,
-           let replacement = presets.first(where: { $0.resolvedKind == .standing }) ?? presets.first {
-            doubleTapUpPresetID = replacement.id
+        for gesture in HardwareGesture.allCases where presetID(for: gesture) == preset.id {
+            switch gesture {
+            case .doubleDown:
+                setPresetID(presets.first(where: { $0.resolvedKind == .sitting })?.id, for: gesture)
+            case .doubleUp:
+                setPresetID(presets.first(where: { $0.resolvedKind == .standing })?.id, for: gesture)
+            default:
+                setPresetID(nil, for: gesture)
+            }
         }
     }
 
