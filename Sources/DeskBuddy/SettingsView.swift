@@ -1,8 +1,8 @@
 import AppKit
-import ServiceManagement
 import SwiftUI
 
-private enum SettingsSection: String, CaseIterable, Identifiable {
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case desks
     case general
     case interactions
     case shortcuts
@@ -10,9 +10,12 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     case diagnostics
     case about
 
+    static let storageKey = "selectedSettingsSection"
+
     var id: Self { self }
     var title: String {
         switch self {
+        case .desks: "Desks"
         case .general: "General"
         case .interactions: "Interactions"
         case .shortcuts: "Keyboard Shortcuts"
@@ -23,6 +26,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     }
     var symbol: String {
         switch self {
+        case .desks: "table.furniture"
         case .general: "gearshape"
         case .interactions: "hand.tap"
         case .shortcuts: "keyboard"
@@ -37,13 +41,13 @@ struct SettingsView: View {
     @ObservedObject var softwareUpdates: SoftwareUpdateController
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var controller = DeskController.shared
-    @State private var selection: SettingsSection? = .general
-    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @AppStorage(SettingsSection.storageKey) private var selectedSection = SettingsSection.general.rawValue
+    @State private var launchAtLogin = LoginItemManager.isEnabled
     @State private var loginError: String?
 
     var body: some View {
         NavigationSplitView {
-            List(SettingsSection.allCases, selection: $selection) { section in
+            List(SettingsSection.allCases, selection: selection) { section in
                 Label(section.title, systemImage: section.symbol)
                     .tag(section)
             }
@@ -72,13 +76,25 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var detailView: some View {
-        switch selection ?? .general {
+        switch currentSection {
+        case .desks: deskSettings
         case .general: generalSettings
         case .interactions: interactionSettings
         case .shortcuts: shortcutSettings
         case .coach: coachSettings
         case .diagnostics: diagnosticsSettings
         case .about: aboutSettings
+        }
+    }
+
+    private var deskSettings: some View {
+        settingsScroll {
+            settingsGroup(
+                "Desk Connection",
+                subtitle: "Find, connect, and switch between compatible Bluetooth desks."
+            ) {
+                DeskManagementView()
+            }
         }
     }
 
@@ -131,6 +147,14 @@ struct SettingsView: View {
                     Text(loginError).font(.caption).foregroundStyle(.red)
                 }
             }
+
+            settingsGroup("Setup") {
+                settingsControlRow("Onboarding") {
+                    Button("Run Setup Again…", systemImage: "sparkles") {
+                        OnboardingWindowController.shared.present(force: true)
+                    }
+                }
+            }
         }
     }
 
@@ -153,9 +177,9 @@ struct SettingsView: View {
                 .opacity(settings.doubleTapEnabled ? 1 : 0.5)
             }
 
-            settingsGroup("Safety") {
+            settingsGroup("Movement Behavior") {
                 Label("Releasing the control stops manual movement immediately.", systemImage: "hand.raised.fill")
-                Label("Targeted movements stop after 30 seconds at the latest.", systemImage: "timer")
+                Label("If a target is not reached within 30 seconds, DeskBuddy stops retrying.", systemImage: "timer")
                 Label("DeskBuddy stops sending commands if the connection is lost.", systemImage: "antenna.radiowaves.left.and.right.slash")
             }
         }
@@ -175,7 +199,7 @@ struct SettingsView: View {
                 shortcutRow(.stop)
             }
 
-            settingsGroup("Shortcuts & Siri") {
+            settingsGroup("Apple Shortcuts") {
                 Label("Sitting, standing, target height, stop, and current height actions are available in Shortcuts.", systemImage: "command")
             }
         }
@@ -334,7 +358,7 @@ struct SettingsView: View {
     private func settingsScroll<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text(selection?.title ?? "DeskBuddy")
+                Text(currentSection.title)
                     .font(.title2.bold())
                 content()
             }
@@ -452,14 +476,24 @@ struct SettingsView: View {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"
     }
 
+    private var currentSection: SettingsSection {
+        SettingsSection(rawValue: selectedSection) ?? .general
+    }
+
+    private var selection: Binding<SettingsSection?> {
+        Binding(
+            get: { currentSection },
+            set: { selectedSection = ($0 ?? .general).rawValue }
+        )
+    }
+
     private func updateLoginItem(_ enabled: Bool) {
         do {
-            if enabled { try SMAppService.mainApp.register() }
-            else { try SMAppService.mainApp.unregister() }
+            try LoginItemManager.setEnabled(enabled)
             loginError = nil
         } catch {
             loginError = error.localizedDescription
-            launchAtLogin = SMAppService.mainApp.status == .enabled
+            launchAtLogin = LoginItemManager.isEnabled
         }
     }
 }

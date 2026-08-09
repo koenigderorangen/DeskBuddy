@@ -6,6 +6,7 @@ import OSLog
 @MainActor
 final class DeskController: NSObject, ObservableObject {
     static let shared = DeskController()
+    static let targetMovementTimeout: TimeInterval = 30
 
     @Published private(set) var state: ConnectionState = .idle
     @Published private(set) var discoveredDesks: [SavedDesk] = []
@@ -19,7 +20,7 @@ final class DeskController: NSObject, ObservableObject {
 
     private let settings = SettingsStore.shared
     private let logger = Logger(subsystem: "local.opendesk.control", category: "Bluetooth")
-    private var central: CBCentralManager!
+    private lazy var central = CBCentralManager(delegate: self, queue: .main)
     private var peripheral: CBPeripheral?
     private var discoveredPeripherals: [UUID: CBPeripheral] = [:]
     private var commandCharacteristic: CBCharacteristic?
@@ -43,7 +44,18 @@ final class DeskController: NSObject, ObservableObject {
 
     private override init() {
         super.init()
-        central = CBCentralManager(delegate: self, queue: .main)
+    }
+
+    var bluetoothAuthorization: CBManagerAuthorization {
+        CBManager.authorization
+    }
+
+    var bluetoothState: CBManagerState {
+        central.state
+    }
+
+    func startBluetooth() {
+        _ = central
     }
 
     func scan() {
@@ -185,7 +197,7 @@ final class DeskController: NSObject, ObservableObject {
 
         stopTimers(sendStop: true)
         targetHeightCm = requestedHeightCm
-        movementDeadline = Date().addingTimeInterval(30)
+        movementDeadline = Date().addingTimeInterval(Self.targetMovementTimeout)
         isMoving = true
         write(DeskProtocol.wake, to: commandCharacteristic, withResponse: true)
         write(DeskProtocol.stop, to: commandCharacteristic, withResponse: true)
@@ -298,7 +310,7 @@ final class DeskController: NSObject, ObservableObject {
         }
         if let deadline = movementDeadline, Date() >= deadline {
             stopMovement()
-            state = .failed("Safety stop after 30 seconds")
+            record("Target movement timed out before the requested height was reached")
             return
         }
         write(payload, to: referenceCharacteristic, withResponse: false)

@@ -28,6 +28,7 @@ final class SettingsStore: ObservableObject {
     @Published var doubleTapUpPresetID: UUID { didSet { defaults.set(doubleTapUpPresetID.uuidString, forKey: Keys.doubleTapUpPreset) } }
     @Published var shortcuts: [String: KeyboardShortcut] { didSet { save(shortcuts, key: Keys.shortcutsConfig) } }
     @Published var disabledShortcutActions: Set<String> { didSet { save(disabledShortcutActions, key: Keys.disabledShortcuts) } }
+    @Published var hasCompletedOnboarding: Bool { didSet { defaults.set(hasCompletedOnboarding, forKey: Keys.onboarding) } }
 
     private let defaults = UserDefaults.standard
 
@@ -56,6 +57,7 @@ final class SettingsStore: ObservableObject {
         static let shortcutsConfig = "shortcutsConfig"
         static let disabledShortcuts = "disabledShortcuts"
         static let englishPresetNamesMigrated = "englishPresetNamesMigrated"
+        static let onboarding = "hasCompletedOnboarding"
     }
 
     private init() {
@@ -109,6 +111,7 @@ final class SettingsStore: ObservableObject {
         } ?? loadedPresets.first(where: { $0.resolvedKind == .standing })!.id
         shortcuts = Self.load([String: KeyboardShortcut].self, key: Keys.shortcutsConfig) ?? [:]
         disabledShortcutActions = Self.load(Set<String>.self, key: Keys.disabledShortcuts) ?? []
+        hasCompletedOnboarding = defaults.bool(forKey: Keys.onboarding)
     }
 
     func formattedHeight(_ centimeters: Double) -> String {

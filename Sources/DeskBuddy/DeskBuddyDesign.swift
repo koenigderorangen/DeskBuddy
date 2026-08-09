@@ -4,7 +4,6 @@ enum DeskBuddyDesign {
     static let cornerRadius: CGFloat = 18
     static let compactCornerRadius: CGFloat = 14
     static let contentWidth: CGFloat = 420
-    static let sidebarWidth: CGFloat = 220
 
     static let accent = Color.accentColor
     static let connected = Color.green

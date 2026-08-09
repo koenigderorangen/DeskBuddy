@@ -1,8 +1,20 @@
 import AppKit
 import SwiftUI
 
+@MainActor
+final class DeskBuddyAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        if SettingsStore.shared.hasCompletedOnboarding {
+            DeskController.shared.startBluetooth()
+        } else {
+            OnboardingWindowController.shared.present()
+        }
+    }
+}
+
 @main
 struct DeskBuddyApp: App {
+    @NSApplicationDelegateAdaptor(DeskBuddyAppDelegate.self) private var appDelegate
     @StateObject private var controller = DeskController.shared
     @StateObject private var settings = SettingsStore.shared
     @StateObject private var softwareUpdates = SoftwareUpdateController.shared

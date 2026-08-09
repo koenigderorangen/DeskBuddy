@@ -18,12 +18,4 @@ LAST_TAG="$(git -C "$PROJECT_DIR" describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*
     [[ -z "$HASH" ]] && continue
     print -r -- "- $SUBJECT (\`$HASH\`)"
   done
-
-  print
-  print -r -- "### Installation"
-  print -r -- "1. Download and extract the ZIP archive."
-  print -r -- "2. Move \`DeskBuddy.app\` to Applications."
-  print -r -- "3. Allow Bluetooth access on first launch."
-  print
-  print -r -- "> This build is ad-hoc signed. Developer ID signing and notarization can be added later."
 } > "$OUTPUT_FILE"

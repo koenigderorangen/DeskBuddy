@@ -1,9 +1,13 @@
 import AppIntents
 import Foundation
 
+private let englishLocale = Locale(identifier: "en")
+
 struct MoveDeskToSittingIntent: AppIntent {
-    static let title: LocalizedStringResource = "Move Desk to Sitting Height"
-    static let description = IntentDescription("Moves the connected desk to the first saved position.")
+    static let title = LocalizedStringResource("Move Desk to Sitting Height", locale: englishLocale)
+    static let description = IntentDescription(
+        LocalizedStringResource("Moves the connected desk to the first saved position.", locale: englishLocale)
+    )
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let message = await MainActor.run { () -> String in
@@ -21,8 +25,10 @@ struct MoveDeskToSittingIntent: AppIntent {
 }
 
 struct MoveDeskToStandingIntent: AppIntent {
-    static let title: LocalizedStringResource = "Move Desk to Standing Height"
-    static let description = IntentDescription("Moves the connected desk to the second saved position.")
+    static let title = LocalizedStringResource("Move Desk to Standing Height", locale: englishLocale)
+    static let description = IntentDescription(
+        LocalizedStringResource("Moves the connected desk to the second saved position.", locale: englishLocale)
+    )
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let message = await MainActor.run { () -> String in
@@ -41,10 +47,15 @@ struct MoveDeskToStandingIntent: AppIntent {
 }
 
 struct MoveDeskToHeightIntent: AppIntent {
-    static let title: LocalizedStringResource = "Move Desk to Height"
-    static let description = IntentDescription("Moves the connected desk to a height between 62 and 127 centimeters.")
+    static let title = LocalizedStringResource("Move Desk to Height", locale: englishLocale)
+    static let description = IntentDescription(
+        LocalizedStringResource("Moves the connected desk to a specified height.", locale: englishLocale)
+    )
 
-    @Parameter(title: "Height in Centimeters", inclusiveRange: (62, 127))
+    @Parameter(
+        title: LocalizedStringResource("Height in Centimeters", locale: englishLocale),
+        inclusiveRange: (62, 127)
+    )
     var height: Double
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -60,23 +71,34 @@ struct MoveDeskToHeightIntent: AppIntent {
 }
 
 struct StopDeskIntent: AppIntent {
-    static let title: LocalizedStringResource = "Stop Desk"
-    static let description = IntentDescription("Stops any desk movement immediately.")
+    static let title = LocalizedStringResource("Stop Desk", locale: englishLocale)
+    static let description = IntentDescription(
+        LocalizedStringResource("Stops any desk movement immediately.", locale: englishLocale)
+    )
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         await MainActor.run { DeskController.shared.stopMovement() }
-        return .result(dialog: "The desk has stopped.")
+        return .result(
+            dialog: IntentDialog(LocalizedStringResource("The desk has stopped.", locale: englishLocale))
+        )
     }
 }
 
 struct GetDeskHeightIntent: AppIntent {
-    static let title: LocalizedStringResource = "Get Desk Height"
-    static let description = IntentDescription("Returns the current height of the connected desk.")
+    static let title = LocalizedStringResource("Get Desk Height", locale: englishLocale)
+    static let description = IntentDescription(
+        LocalizedStringResource("Returns the current height of the connected desk.", locale: englishLocale)
+    )
 
     func perform() async throws -> some IntentResult & ReturnsValue<Double> & ProvidesDialog {
         let height = await MainActor.run { DeskController.shared.heightCm }
         guard let height else {
-            return .result(value: -1, dialog: "The desk height is unavailable.")
+            return .result(
+                value: -1,
+                dialog: IntentDialog(
+                    LocalizedStringResource("The desk height is unavailable.", locale: englishLocale)
+                )
+            )
         }
         return .result(
             value: height,
@@ -90,25 +112,25 @@ struct OpenDeskShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: MoveDeskToSittingIntent(),
             phrases: ["Sit with \(.applicationName)", "\(.applicationName) sitting height"],
-            shortTitle: "Sitting Height",
+            shortTitle: LocalizedStringResource("Sitting Height", locale: englishLocale),
             systemImageName: "chair"
         )
         AppShortcut(
             intent: MoveDeskToStandingIntent(),
             phrases: ["Stand with \(.applicationName)", "\(.applicationName) standing height"],
-            shortTitle: "Standing Height",
+            shortTitle: LocalizedStringResource("Standing Height", locale: englishLocale),
             systemImageName: "figure.stand"
         )
         AppShortcut(
             intent: StopDeskIntent(),
             phrases: ["Stop the desk with \(.applicationName)"],
-            shortTitle: "Stop Desk",
+            shortTitle: LocalizedStringResource("Stop Desk", locale: englishLocale),
             systemImageName: "stop.fill"
         )
         AppShortcut(
             intent: GetDeskHeightIntent(),
             phrases: ["Desk height with \(.applicationName)"],
-            shortTitle: "Desk Height",
+            shortTitle: LocalizedStringResource("Desk Height", locale: englishLocale),
             systemImageName: "arrow.up.and.down"
         )
     }

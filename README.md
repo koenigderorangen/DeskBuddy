@@ -1,58 +1,80 @@
-# DeskBuddy
+<p align="center">
+	<img src="Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-256.png" width="144" alt="DeskBuddy app icon">
+</p>
 
-A compact, native macOS menu bar controller for IKEA IDÅSEN and compatible LINAK Bluetooth desks.
+<h1 align="center">DeskBuddy</h1>
 
-## Features
+<p align="center">
+	Native macOS menu bar control for IKEA IDÅSEN and compatible LINAK desks.
+</p>
 
-- Bluetooth discovery, connection, and automatic reconnection
-- Live height in centimeters or inches
-- Safe manual movement: press and hold to move, release to stop
-- Sitting, standing, minimum, maximum, and custom saved positions
-- Global keyboard shortcuts and Shortcuts/Siri integration
-- Fixed IDÅSEN limits of 62–127 cm and a 30-second safety stop
-- Posture Coach with gentle reminders and optional automatic movement after a cancel countdown
-- Optional launch at login
-- Native Liquid Glass interface for macOS 26 and later
+<p align="center">
+	Move your desk, save favorite heights, and build healthier sit-stand habits without leaving the menu bar.
+</p>
 
-## Local Build
+## Your Desk, One Click Away
+
+DeskBuddy keeps everyday desk controls close without turning them into another dashboard. Connect over Bluetooth, see the current height at a glance, and move directly to the position you need.
+
+- **Return to the right height** — Save sitting, standing, minimum, maximum, and custom positions.
+- **Double-tap into position** — Tap the physical paddle twice to move directly to your chosen sitting or standing height.
+- **Stay in your flow** — Use global keyboard shortcuts or actions in Apple Shortcuts without opening the menu.
+- **Change posture on time** — Get gentle Posture Coach reminders with an optional cancelable movement countdown.
+- **See what matters** — Show the current height in centimeters or inches directly in the menu bar.
+- **Feel at home on macOS** — Native SwiftUI, Liquid Glass, launch at login, and automatic reconnection.
+- **Move manually when needed** — Press and hold to move, release to stop, or stop an active preset movement from the menu.
+
+## Designed Around Your Routine
+
+### Double-tap movement
+
+The IDÅSEN normally requires holding its physical paddle until the desk reaches the desired height. DeskBuddy adds a faster option: double-tap up or down and the desk moves to the saved position assigned to that direction. Both targets remain configurable in Settings.
+
+### Quick movement
+
+Open DeskBuddy from the menu bar and hold the up or down control. Movement continues while pressed and stops when released.
+
+### Saved positions
+
+Create named positions for the heights you use throughout the day. Presets remain editable and can be reordered from their context menu.
+
+### Keyboard and voice
+
+Assign global shortcuts to movement and presets, disable individual shortcuts when they are not needed, or trigger DeskBuddy actions through Apple Shortcuts.
+
+### Posture Coach
+
+Choose your active weekdays and reminder cadence. DeskBuddy can simply remind you or prepare an automatic move with a visible countdown that you can cancel at any time.
+
+## Compatibility
+
+- macOS 26 or later
+- IKEA IDÅSEN desks
+- Compatible LINAK Bluetooth desk controllers using the same GATT protocol
+- Bluetooth access
+
+## Connect Your Desk
+
+On first launch, DeskBuddy guides you through Bluetooth access, optional Posture Coach notifications, startup behavior, and desk connection.
+
+1. Quit other desk-control apps and disconnect the desk from them.
+2. Hold the Bluetooth button under the desk for about three seconds, until its LED flashes blue.
+3. In onboarding, choose **Find Desks**. You can return to the same controls later in **Settings → Desks**.
+4. Select your desk and verify the displayed height before moving it.
+5. Test a short manual move before using saved positions.
+
+If the desk moves unexpectedly, use DeskBuddy's red **Stop** button or the physical desk control immediately.
+
+## Build From Source
 
 ```sh
-chmod +x build-app.sh
 ./build-app.sh
 ```
 
-The finished app is created at `outputs/DeskBuddy.app`.
+The app bundle is written to `outputs/DeskBuddy.app`. Development requires Xcode with the macOS 26 SDK and Swift 6.2.
 
-## First Hardware Test
+See [CONTRIBUTING.md](CONTRIBUTING.md) for verification and commit conventions.
 
-1. Quit any other desk-control apps and disconnect the desk from them.
-2. Hold the Bluetooth button under the desk for about three seconds until the LED flashes blue.
-3. Launch DeskBuddy and choose “Search for New Desks.”
-4. Verify the live height before moving the desk.
-5. Briefly press and hold Move Up and Move Down, releasing each control to stop.
-6. Test a saved position only after manual movement works correctly.
+## Protocol and Independence
 
-If the desk moves unexpectedly, use the red Stop button or the physical desk control immediately.
-
-## Protocol
-
-The implementation uses the publicly documented LINAK/IDÅSEN GATT protocol. It does not include components, artwork, or source code from any commercial app.
-
-## Releases
-
-Pull requests run the Swift test suite on GitHub’s macOS 26 runner. On `main`, Conventional Commits determine the next version, run the tests again, build the app, and publish a DMG in a GitHub Release. Sparkle uses the release's signed `appcast.xml` to deliver automatic updates. Release builds require matching `SPARKLE_PUBLIC_KEY` and `SPARKLE_PRIVATE_KEY` repository secrets generated with Sparkle's `generate_keys` tool. See [CONTRIBUTING.md](CONTRIBUTING.md) for the supported commit types.
-
-Configure Sparkle signing once after resolving package dependencies:
-
-```sh
-SPARKLE_TOOLS=.build/artifacts/sparkle/Sparkle/bin
-"$SPARKLE_TOOLS/generate_keys" --account DeskBuddy
-"$SPARKLE_TOOLS/generate_keys" --account DeskBuddy -p | gh secret set SPARKLE_PUBLIC_KEY
-PRIVATE_KEY_DIR="$(mktemp -d)"
-PRIVATE_KEY_FILE="$PRIVATE_KEY_DIR/sparkle-private-key"
-"$SPARKLE_TOOLS/generate_keys" --account DeskBuddy -x "$PRIVATE_KEY_FILE"
-gh secret set SPARKLE_PRIVATE_KEY < "$PRIVATE_KEY_FILE"
-rm -rf "$PRIVATE_KEY_DIR"
-```
-
-Keep the private key backed up securely. Losing it prevents existing installations from trusting future updates.
+DeskBuddy uses the publicly documented LINAK/IDÅSEN Bluetooth GATT protocol. It does not include components, artwork, or source code from any commercial desk-control app, and it is not affiliated with IKEA or LINAK.

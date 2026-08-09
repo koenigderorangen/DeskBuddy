@@ -4,6 +4,10 @@
 <dict>
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+    </array>
     <key>CFBundleDisplayName</key>
     <string>DeskBuddy</string>
     <key>CFBundleExecutable</key>

@@ -23,7 +23,7 @@ import Testing
     #expect(DeskProtocol.encodeTarget(heightCm: 127) == Data([0x64, 0x19]))
 }
 
-@Test func rejectsUnsafeTargetsAndMalformedTelemetry() {
+@Test func rejectsOutOfRangeTargetsAndMalformedTelemetry() {
     #expect(DeskProtocol.encodeTarget(heightCm: 61.9) == nil)
     #expect(DeskProtocol.encodeTarget(heightCm: 127.1) == nil)
     #expect(DeskProtocol.decodePosition(Data([0, 0, 0])) == nil)

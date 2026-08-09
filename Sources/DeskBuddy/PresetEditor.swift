@@ -32,9 +32,15 @@ struct PresetEditorView: View {
     let onCancel: () -> Void
     let onSave: () -> Void
 
-    private let symbols = [
-        "chair", "figure.stand", "arrow.down.to.line", "arrow.up.to.line",
-        "figure.walk", "laptopcomputer", "cup.and.saucer", "star"
+    private let symbols: [(name: String, systemName: String)] = [
+        ("Sitting", "chair"),
+        ("Standing", "figure.stand"),
+        ("Lowest Position", "arrow.down.to.line"),
+        ("Highest Position", "arrow.up.to.line"),
+        ("Walking", "figure.walk"),
+        ("Laptop", "laptopcomputer"),
+        ("Coffee Break", "cup.and.saucer"),
+        ("Favorite", "star")
     ]
 
     var body: some View {
@@ -63,9 +69,9 @@ struct PresetEditorView: View {
 
             HStack(spacing: 14) {
                 Menu {
-                    ForEach(symbols, id: \.self) { symbol in
-                        Button { model.draft.symbol = symbol } label: {
-                            Label(symbol, systemImage: symbol)
+                    ForEach(symbols, id: \.systemName) { symbol in
+                        Button { model.draft.symbol = symbol.systemName } label: {
+                            Label(symbol.name, systemImage: symbol.systemName)
                         }
                     }
                 } label: {

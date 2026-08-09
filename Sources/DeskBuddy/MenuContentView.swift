@@ -6,23 +6,12 @@ struct MenuContentView: View {
     @ObservedObject var controller: DeskController
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var coach = PostureCoach.shared
-    @State private var sidebarVisible = false
     @State private var editorPresented = false
     @State private var hoveredPresetID: UUID?
 
     var body: some View {
         GlassEffectContainer(spacing: 12) {
-            ZStack(alignment: .leading) {
-                mainPanel
-
-                if sidebarVisible {
-                    deskSidebar
-                        .frame(width: DeskBuddyDesign.sidebarWidth)
-                        .background(.regularMaterial)
-                        .transition(.move(edge: .leading).combined(with: .opacity))
-                        .zIndex(1)
-                }
-            }
+            mainPanel
         }
         .frame(width: DeskBuddyDesign.contentWidth, height: 480)
         .clipped()
@@ -53,13 +42,6 @@ struct MenuContentView: View {
         closeEditor()
     }
 
-    private func setSidebarVisible(_ visible: Bool) {
-        guard visible != sidebarVisible else { return }
-        withAnimation(.snappy(duration: 0.28)) {
-            sidebarVisible = visible
-        }
-    }
-
     private var mainPanel: some View {
         VStack(spacing: 0) {
             header
@@ -83,16 +65,6 @@ struct MenuContentView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Button {
-                setSidebarVisible(!sidebarVisible)
-            } label: {
-                Image(systemName: "sidebar.leading")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.glass(.regular.tint(DeskBuddyDesign.trayGlassTint)))
-            .help("Desks")
-
             Text(connectedDeskName)
                 .font(.headline)
                 .lineLimit(1)
@@ -311,106 +283,18 @@ struct MenuContentView: View {
                 .foregroundStyle(.secondary)
             VStack(spacing: 5) {
                 Text("No Desk Connected").font(.headline)
-                Text("Open the desk list and connect your IDÅSEN.")
+                Text("Open Settings to find and connect your desk.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
-            Button("Open Desks", systemImage: "sidebar.leading") {
-                setSidebarVisible(true)
+            Button("Manage Desks…", systemImage: "table.furniture") {
+                openDeskSettings()
             }
             .buttonStyle(.glass(.regular.tint(.accentColor)))
             Spacer()
         }
         .padding(24)
-    }
-
-    private var deskSidebar: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Desks")
-                    .font(.headline)
-                Spacer()
-                Button {
-                    setSidebarVisible(false)
-                } label: {
-                    Image(systemName: "xmark")
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.glass(.regular.tint(DeskBuddyDesign.trayGlassTint)))
-                .help("Close Desks")
-            }
-            .padding(14)
-
-            List(selection: deskSelection) {
-                Section {
-                    ForEach(availableDesks) { desk in
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(desk.name)
-                                    .font(.subheadline.weight(.semibold))
-                                if desk.id == controller.connectedDeskID {
-                                    Text("Connected")
-                                        .font(.caption2)
-                                        .foregroundStyle(DeskBuddyDesign.connected)
-                                }
-                            }
-                        } icon: {
-                            Image(systemName: "table.furniture")
-                                .foregroundStyle(
-                                    desk.id == controller.connectedDeskID ? DeskBuddyDesign.connected : .secondary
-                                )
-                        }
-                        .tag(desk.id)
-                        .contextMenu {
-                            if desk.id == controller.connectedDeskID {
-                                Button("Disconnect", systemImage: "xmark.circle") { controller.disconnect() }
-                            } else {
-                                Button("Connect", systemImage: "link") { controller.connect(to: desk) }
-                            }
-                        }
-                    }
-                }
-            }
-            .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
-
-            VStack(alignment: .leading, spacing: 10) {
-                Button(controller.isScanning ? "Searching …" : "Find Desks", systemImage: "magnifyingglass") {
-                    controller.scan()
-                }
-                .buttonStyle(.glass(.regular.tint(DeskBuddyDesign.trayGlassTint)))
-                .disabled(controller.isScanning)
-
-                if controller.connectedDeskID != nil {
-                    Button("Disconnect", systemImage: "xmark.circle") {
-                        controller.disconnect()
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                }
-
-                Divider()
-                Button("Quit DeskBuddy", systemImage: "power") {
-                    NSApplication.shared.terminate(nil)
-                }
-                .buttonStyle(.plain)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            .padding(14)
-        }
-    }
-
-    private var deskSelection: Binding<UUID?> {
-        Binding(
-            get: { controller.connectedDeskID },
-            set: { selectedID in
-                guard let selectedID,
-                      let desk = availableDesks.first(where: { $0.id == selectedID }) else { return }
-                controller.connect(to: desk)
-            }
-        )
     }
 
     private var connectedDeskName: String {
@@ -421,11 +305,9 @@ struct MenuContentView: View {
         return "DeskBuddy"
     }
 
-    private var availableDesks: [SavedDesk] {
-        var result = settings.savedDesks
-        for desk in controller.discoveredDesks where !result.contains(where: { $0.id == desk.id }) {
-            result.append(desk)
-        }
-        return result
+    private func openDeskSettings() {
+        UserDefaults.standard.set(SettingsSection.desks.rawValue, forKey: SettingsSection.storageKey)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        openSettings()
     }
 }
