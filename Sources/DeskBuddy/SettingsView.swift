@@ -45,6 +45,13 @@ struct SettingsView: View {
     @AppStorage(SettingsSection.storageKey) private var selectedSection = SettingsSection.general.rawValue
     @State private var launchAtLogin = LoginItemManager.isEnabled
     @State private var loginError: String?
+    @State private var editingPaddleRuleID: UUID?
+    @State private var draftPaddleDirections: [ManualDirection] = []
+    @State private var draftPaddlePresetID: UUID?
+#if DEBUG
+    @AppStorage(DeskBuddyDesign.debugPanelWidthKey) private var debugPanelWidth = Double(DeskBuddyDesign.contentWidth)
+    @AppStorage(DeskBuddyDesign.debugPanelHeightKey) private var debugPanelHeight = Double(DeskBuddyDesign.contentHeight)
+#endif
 
     var body: some View {
         NavigationSplitView {
@@ -141,6 +148,9 @@ struct SettingsView: View {
                     .pickerStyle(.segmented)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 }
+            }
+
+            settingsGroup("Startup & Connection") {
                 settingsToggleRow("Automatically reconnect", isOn: $settings.autoReconnect)
                 settingsToggleRow("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in updateLoginItem(enabled) }
@@ -149,13 +159,6 @@ struct SettingsView: View {
                 }
             }
 
-            settingsGroup("Setup") {
-                settingsControlRow("Onboarding") {
-                    Button("Run Setup Again…", systemImage: "sparkles") {
-                        OnboardingWindowController.shared.present(force: true)
-                    }
-                }
-            }
         }
     }
 
@@ -163,16 +166,74 @@ struct SettingsView: View {
         settingsScroll {
             settingsGroup(
                 "Physical Paddle Gestures",
-                subtitle: "Use short taps on the desk paddle to move to assigned presets. Triple taps take priority over double taps when both are assigned."
+                subtitle: "Build sequences of two or more short paddle taps and assign each one to a saved position."
             ) {
                 settingsToggleRow("Enable paddle gestures", isOn: $settings.paddleGesturesEnabled)
-                ForEach(HardwareGesture.allCases) { gesture in
-                    settingsControlRow(gesture.title) {
-                        gesturePresetPicker(gesture)
+
+                Group {
+                    if settings.paddleGestureRules.isEmpty {
+                        Label("No gestures configured", systemImage: "hand.tap")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 8)
+                    } else {
+                        ForEach(Array(settings.paddleGestureRules.enumerated()), id: \.element.id) { index, rule in
+                            if index > 0 { Divider() }
+                            HStack(spacing: 12) {
+                                ScrollView(.horizontal) {
+                                    paddleSequence(rule.directions)
+                                }
+                                .scrollIndicators(.never)
+                                .frame(minWidth: 112, maxWidth: 150, alignment: .leading)
+
+                                Image(systemName: "arrow.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+
+                                presetPicker(selection: Binding(
+                                    get: {
+                                        settings.paddleGestureRules.first(where: { $0.id == rule.id })?.presetID
+                                            ?? rule.presetID
+                                    },
+                                    set: { presetID in
+                                        var updated = rule
+                                        updated.presetID = presetID
+                                        settings.updatePaddleGestureRule(updated)
+                                    }
+                                ))
+
+                                Button {
+                                    beginEditingPaddleRule(rule)
+                                } label: {
+                                    Image(systemName: "pencil")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Edit gesture")
+
+                                Button(role: .destructive) {
+                                    settings.deletePaddleGestureRule(rule)
+                                    if editingPaddleRuleID == rule.id { cancelPaddleRuleEditor() }
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Delete gesture")
+                            }
+                        }
                     }
-                    .disabled(!settings.paddleGesturesEnabled)
-                    .opacity(settings.paddleGesturesEnabled ? 1 : 0.5)
+
+                    Divider()
+                    if draftPaddlePresetID != nil {
+                        paddleRuleEditor
+                    } else {
+                        Button("Add Gesture", systemImage: "plus") {
+                            beginAddingPaddleRule()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 }
+                .disabled(!settings.paddleGesturesEnabled)
+                .opacity(settings.paddleGesturesEnabled ? 1 : 0.5)
             }
 
             settingsGroup("Movement Behavior") {
@@ -218,14 +279,14 @@ struct SettingsView: View {
                 )
                     .disabled(!settings.coachEnabled)
                 settingsToggleRow(
-                    "Automatically move desk after countdown",
+                    "Automatically move to the next position",
                     isOn: $settings.automaticMovementEnabled,
                     disabled: !settings.coachEnabled
                 )
                     .disabled(!settings.coachEnabled)
 
                 if settings.automaticMovementEnabled {
-                    settingsControlRow("Cancel countdown") {
+                    settingsControlRow("Countdown before moving") {
                         HStack(spacing: 10) {
                             Text("\(settings.movementCountdownSeconds) seconds")
                                 .monospacedDigit()
@@ -243,36 +304,38 @@ struct SettingsView: View {
             }
 
             settingsGroup("Intervals") {
-                settingsControlRow("Next reminder in") {
-                    if let pendingMovement = coach.pendingMovement {
-                        Text("\(coach.remainingSeconds) sec to \(pendingMovement.preset.name)")
-                            .monospacedDigit()
-                    } else if let nextReminder = coach.nextReminder {
-                        Text(nextReminder, style: .timer)
-                            .monospacedDigit()
-                    } else {
-                        Text("Not scheduled")
-                            .foregroundStyle(.secondary)
-                    }
-                }
                 intervalRow("Sitting interval", symbol: "chair", value: $settings.sittingIntervalMinutes, range: 10...120)
                 Divider()
                 intervalRow("Standing interval", symbol: "figure.stand", value: $settings.standingIntervalMinutes, range: 5...60)
+                Divider()
+                intervalStatusFooter
             }
 
             settingsGroup("Schedule", subtitle: "The coach stays quiet outside these hours.") {
                 settingsControlRow("From") {
-                    Picker("", selection: $settings.activeStartHour) {
-                        ForEach(0..<24, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) }
-                    }
+                    DatePicker(
+                        "",
+                        selection: scheduleTimeBinding(
+                            hour: $settings.activeStartHour,
+                            minute: $settings.activeStartMinute
+                        ),
+                        displayedComponents: .hourAndMinute
+                    )
                     .labelsHidden()
+                    .datePickerStyle(.field)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 settingsControlRow("To") {
-                    Picker("", selection: $settings.activeEndHour) {
-                        ForEach(1...24, id: \.self) { Text(String(format: "%02d:00", $0 % 24)).tag($0) }
-                    }
+                    DatePicker(
+                        "",
+                        selection: scheduleTimeBinding(
+                            hour: $settings.activeEndHour,
+                            minute: $settings.activeEndMinute
+                        ),
+                        displayedComponents: .hourAndMinute
+                    )
                     .labelsHidden()
+                    .datePickerStyle(.field)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 settingsControlRow("Active days") {
@@ -326,7 +389,9 @@ struct SettingsView: View {
     .onChange(of: settings.sittingIntervalMinutes) { _, _ in coach.refreshSchedule() }
     .onChange(of: settings.standingIntervalMinutes) { _, _ in coach.refreshSchedule() }
     .onChange(of: settings.activeStartHour) { _, _ in coach.refreshSchedule() }
+    .onChange(of: settings.activeStartMinute) { _, _ in coach.refreshSchedule() }
     .onChange(of: settings.activeEndHour) { _, _ in coach.refreshSchedule() }
+    .onChange(of: settings.activeEndMinute) { _, _ in coach.refreshSchedule() }
     .onChange(of: settings.activeWeekdays) { _, _ in coach.refreshSchedule() }
     }
 
@@ -362,6 +427,30 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
+
+            settingsGroup("Setup") {
+                settingsControlRow("Onboarding") {
+                    Button("Run Setup Again…", systemImage: "sparkles") {
+                        OnboardingWindowController.shared.present(force: true)
+                    }
+                }
+            }
+
+#if DEBUG
+            settingsGroup(
+                "Panel Size",
+                subtitle: "Development builds only. Adjust the menu panel while testing layouts."
+            ) {
+                debugPanelSizeRow("Width", value: $debugPanelWidth, range: 240...900)
+                debugPanelSizeRow("Height", value: $debugPanelHeight, range: 280...1000)
+                settingsControlRow("Defaults") {
+                    Button("Reset Panel Size", systemImage: "arrow.counterclockwise") {
+                        debugPanelWidth = Double(DeskBuddyDesign.contentWidth)
+                        debugPanelHeight = Double(DeskBuddyDesign.contentHeight)
+                    }
+                }
+            }
+#endif
         }
     }
 
@@ -388,6 +477,23 @@ struct SettingsView: View {
                     }
                     .disabled(!softwareUpdates.canCheckForUpdates)
                 }
+                Divider()
+                settingsToggleRow(
+                    "Automatically check for updates",
+                    isOn: Binding(
+                        get: { softwareUpdates.automaticallyChecksForUpdates },
+                        set: { softwareUpdates.setAutomaticallyChecksForUpdates($0) }
+                    )
+                )
+                settingsToggleRow(
+                    "Automatically download updates",
+                    isOn: Binding(
+                        get: { softwareUpdates.automaticallyDownloadsUpdates },
+                        set: { softwareUpdates.setAutomaticallyDownloadsUpdates($0) }
+                    ),
+                    disabled: !softwareUpdates.automaticallyChecksForUpdates
+                )
+                .disabled(!softwareUpdates.automaticallyChecksForUpdates)
             }
         }
     }
@@ -473,18 +579,166 @@ struct SettingsView: View {
         }
     }
 
-    private func gesturePresetPicker(_ gesture: HardwareGesture) -> some View {
-        Picker("", selection: Binding(
-            get: { settings.presetID(for: gesture) },
-            set: { settings.setPresetID($0, for: gesture) }
-        )) {
-            Text("None").tag(nil as UUID?)
+    private var intervalStatusFooter: some View {
+        HStack(spacing: 12) {
+            Group {
+                if let pendingMovement = coach.pendingMovement {
+                    Text("Move: \(coach.remainingSeconds)s to \(pendingMovement.preset.name)")
+                        .monospacedDigit()
+                } else if let nextReminder = coach.nextReminder {
+                    HStack(spacing: 4) {
+                        Text("Next:")
+                        Text(nextReminder, style: .timer)
+                            .monospacedDigit()
+                    }
+                } else if !settings.coachEnabled {
+                    Text("Coach off")
+                } else if coach.nextScheduleStart != nil {
+                    Text("Outside schedule")
+                } else {
+                    Text("Paused")
+                }
+            }
+            .lineLimit(1)
+
+            Spacer(minLength: 12)
+
+            if let nextScheduleStart = coach.nextScheduleStart {
+                Text("Resumes \(nextScheduleStart, format: .dateTime.weekday(.abbreviated).hour().minute())")
+                    .lineLimit(1)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func scheduleTimeBinding(hour: Binding<Int>, minute: Binding<Int>) -> Binding<Date> {
+        Binding(
+            get: {
+                Calendar.current.date(
+                    bySettingHour: hour.wrappedValue,
+                    minute: minute.wrappedValue,
+                    second: 0,
+                    of: Date()
+                ) ?? Date()
+            },
+            set: { date in
+                let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+                hour.wrappedValue = components.hour ?? hour.wrappedValue
+                minute.wrappedValue = components.minute ?? minute.wrappedValue
+            }
+        )
+    }
+
+#if DEBUG
+    private func debugPanelSizeRow(
+        _ title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>
+    ) -> some View {
+        settingsControlRow(title) {
+            HStack(spacing: 10) {
+                Text("\(Int(value.wrappedValue)) pt")
+                    .monospacedDigit()
+                    .frame(width: 48, alignment: .trailing)
+                Slider(value: value, in: range, step: 10)
+                Stepper("", value: value, in: range, step: 10)
+                    .labelsHidden()
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+#endif
+
+    private func presetPicker(selection: Binding<UUID>) -> some View {
+        Picker("", selection: selection) {
             ForEach(settings.presets) { preset in
-                Label(preset.name, systemImage: preset.symbol).tag(preset.id as UUID?)
+                Label(preset.name, systemImage: preset.symbol).tag(preset.id)
             }
         }
         .labelsHidden()
         .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    @ViewBuilder
+    private func paddleSequence(_ directions: [ManualDirection]) -> some View {
+        HStack(spacing: 5) {
+            ForEach(Array(directions.enumerated()), id: \.offset) { _, direction in
+                Image(systemName: direction.symbol)
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 24, height: 24)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 5))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(directions.map { $0 == .up ? "Up" : "Down" }.joined(separator: ", "))
+    }
+
+    private var paddleRuleEditor: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(editingPaddleRuleID == nil ? "New Gesture" : "Edit Gesture")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button {
+                    draftPaddleDirections.append(.up)
+                } label: {
+                    Image(systemName: "arrow.up")
+                }
+                .help("Add up tap")
+                Button {
+                    draftPaddleDirections.append(.down)
+                } label: {
+                    Image(systemName: "arrow.down")
+                }
+                .help("Add down tap")
+                Button {
+                    if !draftPaddleDirections.isEmpty { draftPaddleDirections.removeLast() }
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                }
+                .disabled(draftPaddleDirections.isEmpty)
+                .help("Remove last tap")
+            }
+
+            HStack {
+                if draftPaddleDirections.isEmpty {
+                    Text("Use the arrow buttons to build a sequence")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ScrollView(.horizontal) {
+                        paddleSequence(draftPaddleDirections)
+                    }
+                    .scrollIndicators(.never)
+                }
+                Spacer()
+            }
+            .frame(minHeight: 28)
+
+            if let draftPaddlePresetID {
+                settingsControlRow("Saved position") {
+                    presetPicker(selection: Binding(
+                        get: { draftPaddlePresetID },
+                        set: { self.draftPaddlePresetID = $0 }
+                    ))
+                }
+            }
+
+            if paddleRuleIsDuplicate {
+                Label("This gesture sequence already exists.", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: cancelPaddleRuleEditor)
+                Button("Save", action: savePaddleRuleEditor)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(draftPaddleDirections.count < 2 || paddleRuleIsDuplicate)
+            }
+        }
     }
 
     private func settingsControlRow<Control: View>(
@@ -528,6 +782,46 @@ struct SettingsView: View {
             get: { currentSection },
             set: { selectedSection = ($0 ?? .general).rawValue }
         )
+    }
+
+    private var paddleRuleIsDuplicate: Bool {
+        settings.paddleGestureRules.contains {
+            $0.id != editingPaddleRuleID && $0.directions == draftPaddleDirections
+        }
+    }
+
+    private func beginAddingPaddleRule() {
+        editingPaddleRuleID = nil
+        draftPaddleDirections = []
+        draftPaddlePresetID = settings.presets.first?.id
+    }
+
+    private func beginEditingPaddleRule(_ rule: PaddleGestureRule) {
+        editingPaddleRuleID = rule.id
+        draftPaddleDirections = rule.directions
+        draftPaddlePresetID = rule.presetID
+    }
+
+    private func cancelPaddleRuleEditor() {
+        editingPaddleRuleID = nil
+        draftPaddleDirections = []
+        draftPaddlePresetID = nil
+    }
+
+    private func savePaddleRuleEditor() {
+        guard draftPaddleDirections.count >= 2,
+              let presetID = draftPaddlePresetID,
+              !paddleRuleIsDuplicate else { return }
+        if let ruleID = editingPaddleRuleID {
+            settings.updatePaddleGestureRule(PaddleGestureRule(
+                id: ruleID,
+                directions: draftPaddleDirections,
+                presetID: presetID
+            ))
+        } else {
+            settings.addPaddleGestureRule(directions: draftPaddleDirections, presetID: presetID)
+        }
+        cancelPaddleRuleEditor()
     }
 
     private func updateLoginItem(_ enabled: Bool) {

@@ -34,12 +34,11 @@ import Testing
     #expect(DeskProtocol.commandCharacteristic.hasPrefix("99FA0002"))
 }
 
-@Test func matchesPhysicalPaddleGestureSequences() {
-    #expect(HardwareGesture.matching([.down, .down]) == .doubleDown)
-    #expect(HardwareGesture.matching([.up, .up]) == .doubleUp)
-    #expect(HardwareGesture.matching([.up, .down]) == .upThenDown)
-    #expect(HardwareGesture.matching([.down, .up]) == .downThenUp)
-    #expect(HardwareGesture.matching([.down, .down, .down]) == .tripleDown)
-    #expect(HardwareGesture.matching([.up, .up, .up]) == .tripleUp)
-    #expect(HardwareGesture.matching([.up]) == nil)
+@Test func paddleGestureRulesMatchArbitraryPrefixes() {
+    let rule = PaddleGestureRule(directions: [.up, .down, .up, .up], presetID: UUID())
+    #expect(rule.starts(with: [.up]))
+    #expect(rule.starts(with: [.up, .down, .up]))
+    #expect(rule.starts(with: rule.directions))
+    #expect(!rule.starts(with: [.down]))
+    #expect(!rule.starts(with: [.up, .down, .up, .up, .down]))
 }

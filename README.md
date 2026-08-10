@@ -17,7 +17,7 @@
 DeskBuddy keeps everyday desk controls close without turning them into another dashboard. Connect over Bluetooth, see the current height at a glance, and move directly to the position you need.
 
 - **Return to the right height** — Save sitting, standing, minimum, maximum, and custom positions.
-- **Double-tap into position** — Tap the physical paddle twice to move directly to a saved height, or assign more presets to alternating and triple taps.
+- **Double-tap into position** — Tap the physical paddle twice to move directly to a saved height, or build your own tap sequences for more presets.
 - **Stay in your flow** — Use global keyboard shortcuts or actions in Apple Shortcuts without opening the menu.
 - **Change posture on time** — Get gentle Posture Coach reminders with an optional cancelable movement countdown.
 - **See what matters** — Show the current height in centimeters or inches directly in the menu bar.
@@ -26,9 +26,9 @@ DeskBuddy keeps everyday desk controls close without turning them into another d
 
 ## Designed Around Your Routine
 
-### Double-tap and paddle gestures
+### Custom paddle gestures
 
-The IDÅSEN normally requires holding its physical paddle until the desk reaches the desired height. DeskBuddy adds a faster option: assign saved positions to double up, double down, up then down, down then up, triple up, or triple down. Each sequence remains individually configurable in Settings, and unused gestures can stay unassigned.
+The IDÅSEN normally requires holding its physical paddle until the desk reaches the desired height. DeskBuddy starts with double up and double down, then lets you add, edit, and remove your own multi-tap sequences. Every sequence can target any saved position.
 
 ### Quick movement
 

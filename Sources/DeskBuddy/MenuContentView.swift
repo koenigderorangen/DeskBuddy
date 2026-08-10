@@ -8,13 +8,33 @@ struct MenuContentView: View {
     @ObservedObject private var coach = PostureCoach.shared
     @State private var editorPresented = false
     @State private var hoveredPresetID: UUID?
+#if DEBUG
+    @AppStorage(DeskBuddyDesign.debugPanelWidthKey) private var debugPanelWidth = Double(DeskBuddyDesign.contentWidth)
+    @AppStorage(DeskBuddyDesign.debugPanelHeightKey) private var debugPanelHeight = Double(DeskBuddyDesign.contentHeight)
+#endif
 
     var body: some View {
         GlassEffectContainer(spacing: 12) {
             mainPanel
         }
-        .frame(width: DeskBuddyDesign.contentWidth, height: 480)
+        .frame(width: panelWidth, height: panelHeight)
         .clipped()
+    }
+
+    private var panelWidth: CGFloat {
+#if DEBUG
+        CGFloat(debugPanelWidth)
+#else
+        DeskBuddyDesign.contentWidth
+#endif
+    }
+
+    private var panelHeight: CGFloat {
+#if DEBUG
+        CGFloat(debugPanelHeight)
+#else
+        DeskBuddyDesign.contentHeight
+#endif
     }
 
     private func editPreset(_ preset: DeskPreset) {
@@ -99,86 +119,100 @@ struct MenuContentView: View {
     }
 
     private var connectedContent: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if coach.pendingMovement != nil {
-                    countdownBanner
-                }
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if coach.pendingMovement != nil {
+                        countdownBanner
+                    }
 
-                heightControls
+                    heightControls(availableWidth: geometry.size.width - 28)
 
-                HStack {
-                    Text("Saved Positions")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    if controller.isMoving {
-                        Button("Stop", systemImage: "stop.fill") {
-                            controller.stopMovement()
-                        }
-                        .buttonStyle(.glass(.regular.tint(.red)))
-                        .controlSize(.small)
-                    } else {
+                    HStack {
+                        Text("Saved Positions")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer()
                         Button {
-                            createPreset()
+                            if controller.isMoving {
+                                controller.stopMovement()
+                            } else {
+                                createPreset()
+                            }
                         } label: {
-                            Image(systemName: "plus")
+                            Image(systemName: controller.isMoving ? "stop.fill" : "plus")
                                 .frame(width: 22, height: 22)
                         }
-                        .buttonStyle(.glass(.regular.tint(DeskBuddyDesign.trayGlassTint)))
+                        .buttonStyle(.glass(.regular.tint(
+                            controller.isMoving ? Color.red : DeskBuddyDesign.trayGlassTint
+                        )))
                         .controlSize(.small)
-                        .help("Add Position")
+                        .help(controller.isMoving ? "Stop Movement" : "Add Position")
+                        .accessibilityLabel(controller.isMoving ? "Stop Movement" : "Add Position")
                     }
-                }
+                    .frame(height: 24)
 
-                presetGrid
+                    presetGrid(availableWidth: geometry.size.width - 28)
+                }
+                .padding(14)
             }
-            .padding(14)
+            .scrollIndicators(.never)
         }
-        .scrollIndicators(.never)
     }
 
-    private var heightControls: some View {
-        HStack(spacing: 14) {
+    private func heightControls(availableWidth: CGFloat) -> some View {
+        let compact = availableWidth < 340
+        let controlSize: CGFloat = compact ? 44 : 52
+        let heightFontSize: CGFloat = compact ? 32 : 40
+
+        return HStack(spacing: compact ? 8 : 14) {
             PressAndHoldButton(
                 title: "Move down",
                 systemImage: "arrow.down",
                 direction: .down,
-                controller: controller
+                controller: controller,
+                size: controlSize
             )
 
-            Spacer()
-
-            VStack(spacing: 2) {
+            ZStack {
                 Text(controller.heightCm.map(settings.formattedHeight) ?? "–")
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .font(.system(size: heightFontSize, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .minimumScaleFactor(0.55)
+                    .frame(maxWidth: .infinity)
                     .contentTransition(.numericText())
-                if abs(controller.speedCmPerSecond) > 0.1 {
-                    Text(controller.speedCmPerSecond > 0 ? "Moving up" : "Moving down")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
-
-            Spacer()
+            .frame(maxWidth: .infinity)
+            .frame(height: controlSize)
+            .overlay(alignment: .bottom) {
+                Text(controller.speedCmPerSecond > 0 ? "Moving up" : "Moving down")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .opacity(abs(controller.speedCmPerSecond) > 0.1 ? 1 : 0)
+                    .accessibilityHidden(abs(controller.speedCmPerSecond) <= 0.1)
+                    .offset(y: 14)
+            }
 
             PressAndHoldButton(
                 title: "Move up",
                 systemImage: "arrow.up",
                 direction: .up,
-                controller: controller
+                controller: controller,
+                size: controlSize
             )
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 2)
+        .padding(.top, 2)
+        .padding(.bottom, 14)
     }
 
-    private var presetGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+    private func presetGrid(availableWidth: CGFloat) -> some View {
+        let columnCount = availableWidth < 280 ? 1 : 2
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: columnCount)
+
+        return LazyVGrid(columns: columns, spacing: 10) {
             ForEach(settings.presets) { preset in
                 presetCard(preset)
             }
@@ -267,8 +301,11 @@ struct MenuContentView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Cancel") { coach.cancelPendingMovement() }
-                    .buttonStyle(.glass)
+                Button("Stop / Cancel", systemImage: "stop.fill") {
+                    coach.cancelPendingMovement()
+                    controller.stopMovement()
+                }
+                    .buttonStyle(.glass(.regular.tint(.red)))
                     .controlSize(.small)
             }
             .padding(12)

@@ -5,12 +5,13 @@ struct PressAndHoldButton: View {
     let systemImage: String
     let direction: ManualDirection
     @ObservedObject var controller: DeskController
+    var size: CGFloat = 52
     @State private var pressed = false
 
     var body: some View {
         Image(systemName: systemImage)
             .font(.system(size: 20, weight: .semibold))
-            .frame(width: 52, height: 52)
+            .frame(width: size, height: size)
             .contentShape(Circle())
             .glassEffect(
                 Glass.regular

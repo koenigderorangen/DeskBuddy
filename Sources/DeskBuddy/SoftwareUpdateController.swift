@@ -6,6 +6,8 @@ final class SoftwareUpdateController: ObservableObject {
     static let shared = SoftwareUpdateController()
 
     @Published private(set) var canCheckForUpdates = false
+    @Published private(set) var automaticallyChecksForUpdates = false
+    @Published private(set) var automaticallyDownloadsUpdates = false
 
     private let updaterController: SPUStandardUpdaterController
 
@@ -19,11 +21,23 @@ final class SoftwareUpdateController: ObservableObject {
         )
 
         guard isConfigured else { return }
+        automaticallyChecksForUpdates = updaterController.updater.automaticallyChecksForUpdates
+        automaticallyDownloadsUpdates = updaterController.updater.automaticallyDownloadsUpdates
         updaterController.updater.publisher(for: \.canCheckForUpdates)
             .assign(to: &$canCheckForUpdates)
     }
 
     func checkForUpdates() {
         updaterController.checkForUpdates(nil)
+    }
+
+    func setAutomaticallyChecksForUpdates(_ enabled: Bool) {
+        automaticallyChecksForUpdates = enabled
+        updaterController.updater.automaticallyChecksForUpdates = enabled
+    }
+
+    func setAutomaticallyDownloadsUpdates(_ enabled: Bool) {
+        automaticallyDownloadsUpdates = enabled
+        updaterController.updater.automaticallyDownloadsUpdates = enabled
     }
 }

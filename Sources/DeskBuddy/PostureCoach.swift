@@ -2,6 +2,11 @@ import Combine
 import Foundation
 import UserNotifications
 
+enum DeskBuddyNotification {
+    static let automaticMovementCategory = "AUTOMATIC_MOVEMENT"
+    static let stopAutomaticMovementAction = "STOP_AUTOMATIC_MOVEMENT"
+}
+
 @MainActor
 final class PostureCoach: ObservableObject {
     struct PendingMovement: Identifiable, Equatable {
@@ -14,6 +19,7 @@ final class PostureCoach: ObservableObject {
     @Published private(set) var pendingMovement: PendingMovement?
     @Published private(set) var remainingSeconds = 0
     @Published private(set) var nextReminder: Date?
+    @Published private(set) var nextScheduleStart: Date?
 
     private var evaluationTimer: Timer?
     private var countdownTask: Task<Void, Never>?
@@ -74,13 +80,20 @@ final class PostureCoach: ObservableObject {
     private func evaluate() {
         let settings = SettingsStore.shared
         guard settings.coachEnabled,
-              settings.coachReminderEnabled || settings.automaticMovementEnabled,
-              isInsideActiveSchedule(settings: settings) else {
+              settings.coachReminderEnabled || settings.automaticMovementEnabled else {
             nextReminder = nil
+            nextScheduleStart = nil
             return
         }
 
         let now = Date()
+        guard isInsideActiveSchedule(settings: settings, at: now) else {
+            nextReminder = nil
+            nextScheduleStart = nextActiveScheduleStart(settings: settings, after: now)
+            return
+        }
+        nextScheduleStart = nil
+
         guard let lastReminder = UserDefaults.standard.object(forKey: lastReminderKey) as? Date else {
             UserDefaults.standard.set(now, forKey: lastReminderKey)
             scheduleNextDate(from: now)
@@ -96,7 +109,7 @@ final class PostureCoach: ObservableObject {
         let targetKind: PresetKind = sitting ? .standing : .sitting
         guard let target = settings.presets.first(where: { $0.resolvedKind == targetKind }) else { return }
 
-        if settings.coachReminderEnabled {
+        if settings.coachReminderEnabled || settings.automaticMovementEnabled {
             sendReminder(target: target, includesCountdown: settings.automaticMovementEnabled)
         }
         if settings.automaticMovementEnabled, DeskController.shared.state.isConnected {
@@ -134,7 +147,8 @@ final class PostureCoach: ObservableObject {
         let content = UNMutableNotificationContent()
         content.title = "Time to Change Position"
         if includesCountdown {
-            content.body = "DeskBuddy will move to \(target.name) shortly. Open the app to cancel."
+            content.body = "DeskBuddy will move to \(target.name) shortly. Use Stop / Cancel to prevent it."
+            content.categoryIdentifier = DeskBuddyNotification.automaticMovementCategory
         } else {
             content.body = "How about \(target.name.lowercased()) now?"
         }
@@ -154,14 +168,45 @@ final class PostureCoach: ObservableObject {
         return height < (sitting.heightCm + standing.heightCm) / 2
     }
 
-    private func isInsideActiveSchedule(settings: SettingsStore) -> Bool {
+    private func isInsideActiveSchedule(settings: SettingsStore, at date: Date) -> Bool {
         let calendar = Calendar.current
-        let now = Date()
-        let weekday = calendar.component(.weekday, from: now)
-        let hour = calendar.component(.hour, from: now)
-        return settings.activeWeekdays.contains(weekday)
-            && hour >= settings.activeStartHour
-            && hour < settings.activeEndHour
+        let weekday = calendar.component(.weekday, from: date)
+        let currentMinute = calendar.component(.hour, from: date) * 60
+            + calendar.component(.minute, from: date)
+        let startMinute = settings.activeStartHour * 60 + settings.activeStartMinute
+        let endMinute = settings.activeEndHour * 60 + settings.activeEndMinute
+        if startMinute == endMinute {
+            return settings.activeWeekdays.contains(weekday)
+        }
+        if startMinute < endMinute {
+            return settings.activeWeekdays.contains(weekday)
+                && currentMinute >= startMinute
+                && currentMinute < endMinute
+        }
+        if currentMinute >= startMinute {
+            return settings.activeWeekdays.contains(weekday)
+        }
+        guard currentMinute < endMinute,
+              let previousDay = calendar.date(byAdding: .day, value: -1, to: date) else { return false }
+        return settings.activeWeekdays.contains(calendar.component(.weekday, from: previousDay))
+    }
+
+    private func nextActiveScheduleStart(settings: SettingsStore, after date: Date) -> Date? {
+        let calendar = Calendar.current
+        let startOfToday = calendar.startOfDay(for: date)
+        for dayOffset in 0...7 {
+            guard let day = calendar.date(byAdding: .day, value: dayOffset, to: startOfToday),
+                  settings.activeWeekdays.contains(calendar.component(.weekday, from: day)),
+                  let candidate = calendar.date(
+                      bySettingHour: settings.activeStartHour,
+                      minute: settings.activeStartMinute,
+                      second: 0,
+                      of: day
+                  ),
+                  candidate > date else { continue }
+            return candidate
+        }
+        return nil
     }
 
     private func scheduleNextDate(from date: Date) {

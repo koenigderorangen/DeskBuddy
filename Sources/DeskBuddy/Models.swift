@@ -102,44 +102,25 @@ enum ConnectionState: Equatable {
     }
 }
 
-enum ManualDirection: Equatable {
+enum ManualDirection: String, Codable, CaseIterable, Identifiable {
     case up
     case down
-}
-
-enum HardwareGesture: String, Codable, CaseIterable, Identifiable {
-    case doubleDown
-    case doubleUp
-    case upThenDown
-    case downThenUp
-    case tripleDown
-    case tripleUp
 
     var id: Self { self }
+    var symbol: String { self == .up ? "arrow.up" : "arrow.down" }
+}
+
+struct PaddleGestureRule: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var directions: [ManualDirection]
+    var presetID: UUID
 
     var title: String {
-        switch self {
-        case .doubleDown: "↓ ↓"
-        case .doubleUp: "↑ ↑"
-        case .upThenDown: "↑ ↓"
-        case .downThenUp: "↓ ↑"
-        case .tripleDown: "↓ ↓ ↓"
-        case .tripleUp: "↑ ↑ ↑"
-        }
+        directions.map { $0 == .up ? "↑" : "↓" }.joined(separator: " ")
     }
 
-    var taps: [ManualDirection] {
-        switch self {
-        case .doubleDown: [.down, .down]
-        case .doubleUp: [.up, .up]
-        case .upThenDown: [.up, .down]
-        case .downThenUp: [.down, .up]
-        case .tripleDown: [.down, .down, .down]
-        case .tripleUp: [.up, .up, .up]
-        }
-    }
-
-    static func matching(_ taps: [ManualDirection]) -> Self? {
-        allCases.first { $0.taps == taps }
+    func starts(with sequence: [ManualDirection]) -> Bool {
+        directions.count >= sequence.count
+            && Array(directions.prefix(sequence.count)) == sequence
     }
 }

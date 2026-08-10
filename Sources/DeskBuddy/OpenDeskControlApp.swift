@@ -5,7 +5,21 @@ import UserNotifications
 @MainActor
 final class DeskBuddyAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        UNUserNotificationCenter.current().delegate = self
+        let notificationCenter = UNUserNotificationCenter.current()
+        notificationCenter.delegate = self
+        notificationCenter.setNotificationCategories([
+            UNNotificationCategory(
+                identifier: DeskBuddyNotification.automaticMovementCategory,
+                actions: [
+                    UNNotificationAction(
+                        identifier: DeskBuddyNotification.stopAutomaticMovementAction,
+                        title: "Stop / Cancel",
+                        options: [.destructive]
+                    )
+                ],
+                intentIdentifiers: []
+            )
+        ])
         let workspaceNotifications = NSWorkspace.shared.notificationCenter
         workspaceNotifications.addObserver(
             self,
@@ -44,6 +58,17 @@ final class DeskBuddyAppDelegate: NSObject, NSApplicationDelegate, UNUserNotific
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
         [.banner, .sound]
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        guard response.actionIdentifier == DeskBuddyNotification.stopAutomaticMovementAction else { return }
+        await MainActor.run {
+            PostureCoach.shared.cancelPendingMovement()
+            DeskController.shared.stopMovement()
+        }
     }
 }
 

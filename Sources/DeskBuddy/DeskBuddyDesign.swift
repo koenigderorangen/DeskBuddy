@@ -3,7 +3,13 @@ import SwiftUI
 enum DeskBuddyDesign {
     static let cornerRadius: CGFloat = 18
     static let compactCornerRadius: CGFloat = 14
-    static let contentWidth: CGFloat = 420
+    static let contentWidth: CGFloat = 310
+    static let contentHeight: CGFloat = 410
+
+#if DEBUG
+    static let debugPanelWidthKey = "debugPanelWidth"
+    static let debugPanelHeightKey = "debugPanelHeight"
+#endif
 
     static let accent = Color.accentColor
     static let connected = Color.green

@@ -54,7 +54,7 @@ final class DeskController: NSObject, ObservableObject {
     private var hardwareMotionDirection: ManualDirection?
     private var hardwareTapSequence: [ManualDirection] = []
     private var lastHardwareTapAt: Date?
-    private var pendingHardwareGesture: HardwareGesture?
+    private var pendingPaddleGestureRule: PaddleGestureRule?
     private var pendingHardwareGestureTask: Task<Void, Never>?
     private var hardwareGestureMovementTask: Task<Void, Never>?
 
@@ -212,16 +212,13 @@ final class DeskController: NSObject, ObservableObject {
         record("Disconnected manually")
     }
 
-    var diagnosticsText: String {
-        diagnosticEvents.joined(separator: "\n")
-    }
-
     var diagnosticsReport: String {
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"
         let buildNumber = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
         let deskIdentifier = connectedDeskID.map { String($0.uuidString.prefix(8)) } ?? "None"
         let height = heightCm.map { String(format: "%.1f cm", $0) } ?? "Unavailable"
         let generatedAt = ISO8601DateFormatter().string(from: Date())
+        let diagnosticsText = diagnosticEvents.joined(separator: "\n")
         return """
         DeskBuddy Diagnostics
         Generated: \(generatedAt)
@@ -295,11 +292,6 @@ final class DeskController: NSObject, ObservableObject {
 
     func move(to preset: DeskPreset) {
         move(to: preset.heightCm)
-    }
-
-    func saveCurrentHeight(as name: String, symbol: String = "star") {
-        guard let heightCm else { return }
-        settings.presets.append(DeskPreset(name: name, heightCm: heightCm, symbol: symbol))
     }
 
     private func connect(_ candidate: CBPeripheral, displayName: String) {
@@ -491,10 +483,8 @@ final class DeskController: NSObject, ObservableObject {
         if let direction, hardwareMotionDirection == nil {
             hardwareGestureMovementTask?.cancel()
             hardwareGestureMovementTask = nil
-            if pendingHardwareGesture != nil {
-                pendingHardwareGestureTask?.cancel()
-                pendingHardwareGestureTask = nil
-            }
+            pendingHardwareGestureTask?.cancel()
+            pendingHardwareGestureTask = nil
             hardwareMotionDirection = direction
             hardwareMotionStartedAt = Date()
             return
@@ -522,10 +512,10 @@ final class DeskController: NSObject, ObservableObject {
     ) {
         if let previous = lastHardwareTapAt,
            startedAt.timeIntervalSince(previous) > Self.hardwareTapInterval {
-            let deferredGesture = pendingHardwareGesture
+            let deferredRule = pendingPaddleGestureRule
             resetHardwareTapSequence()
-            if let deferredGesture {
-                performHardwareGesture(deferredGesture)
+            if let deferredRule {
+                performPaddleGesture(deferredRule)
                 return
             }
         }
@@ -533,33 +523,26 @@ final class DeskController: NSObject, ObservableObject {
         hardwareTapSequence.append(direction)
         lastHardwareTapAt = finishedAt
 
-        if hardwareTapSequence.count == 2,
-           let gesture = HardwareGesture.matching(hardwareTapSequence) {
-            let tripleGesture: HardwareGesture? = switch gesture {
-            case .doubleDown: .tripleDown
-            case .doubleUp: .tripleUp
-            default: nil
-            }
-            if let tripleGesture, settings.preset(for: tripleGesture) != nil {
-                deferHardwareGesture(gesture)
-            } else {
-                performHardwareGesture(gesture)
-                resetHardwareTapSequence()
-            }
-            return
+        let matchingRule = settings.paddleGestureRules.first { $0.directions == hardwareTapSequence }
+        let hasLongerRule = settings.paddleGestureRules.contains {
+            $0.directions.count > hardwareTapSequence.count && $0.starts(with: hardwareTapSequence)
         }
 
-        guard hardwareTapSequence.count == 3 else { return }
-        if let gesture = HardwareGesture.matching(hardwareTapSequence) {
-            performHardwareGesture(gesture)
-        } else if let pendingHardwareGesture {
-            performHardwareGesture(pendingHardwareGesture)
+        if let matchingRule, !hasLongerRule {
+            performPaddleGesture(matchingRule)
+            resetHardwareTapSequence()
+        } else if matchingRule != nil || hasLongerRule {
+            deferPaddleGesture(matchingRule)
+        } else if let pendingPaddleGestureRule {
+            performPaddleGesture(pendingPaddleGestureRule)
+            resetHardwareTapSequence()
+        } else {
+            resetHardwareTapSequence()
         }
-        resetHardwareTapSequence()
     }
 
-    private func deferHardwareGesture(_ gesture: HardwareGesture) {
-        pendingHardwareGesture = gesture
+    private func deferPaddleGesture(_ rule: PaddleGestureRule?) {
+        pendingPaddleGestureRule = rule
         let expectedSequence = hardwareTapSequence
         pendingHardwareGestureTask?.cancel()
         pendingHardwareGestureTask = Task { @MainActor [weak self] in
@@ -569,14 +552,20 @@ final class DeskController: NSObject, ObservableObject {
                 return
             }
             guard let self, self.hardwareTapSequence == expectedSequence else { return }
-            self.performHardwareGesture(gesture)
+            if let rule {
+                self.performPaddleGesture(rule)
+            }
             self.resetHardwareTapSequence()
         }
     }
 
-    private func performHardwareGesture(_ gesture: HardwareGesture) {
-        guard let preset = settings.preset(for: gesture) else { return }
-        record("\(gesture.title) detected: \(preset.name)")
+    private func performPaddleGesture(_ rule: PaddleGestureRule) {
+        guard settings.paddleGesturesEnabled,
+              let currentRule = settings.paddleGestureRules.first(where: {
+                  $0.id == rule.id && $0.directions == rule.directions
+              }),
+              let preset = settings.preset(for: currentRule) else { return }
+        record("\(currentRule.title) detected: \(preset.name)")
         hardwareGestureMovementTask?.cancel()
         hardwareGestureMovementTask = Task { @MainActor [weak self] in
             do {
@@ -584,9 +573,15 @@ final class DeskController: NSObject, ObservableObject {
             } catch {
                 return
             }
-            guard let self, self.state.isConnected else { return }
+            guard let self,
+                  self.state.isConnected,
+                  self.settings.paddleGesturesEnabled,
+                  let currentRule = self.settings.paddleGestureRules.first(where: {
+                      $0.id == rule.id && $0.directions == rule.directions
+                  }),
+                  let currentPreset = self.settings.preset(for: currentRule) else { return }
             self.hardwareGestureMovementTask = nil
-            self.move(to: preset)
+            self.move(to: currentPreset)
         }
     }
 
@@ -601,7 +596,7 @@ final class DeskController: NSObject, ObservableObject {
     private func resetHardwareTapSequence() {
         pendingHardwareGestureTask?.cancel()
         pendingHardwareGestureTask = nil
-        pendingHardwareGesture = nil
+        pendingPaddleGestureRule = nil
         hardwareTapSequence = []
         lastHardwareTapAt = nil
     }
