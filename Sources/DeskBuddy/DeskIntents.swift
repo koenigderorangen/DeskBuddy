@@ -3,6 +3,39 @@ import Foundation
 
 private let englishLocale = Locale(identifier: "en")
 
+struct PausePostureCoachFocusFilter: SetFocusFilterIntent {
+    static let title = LocalizedStringResource("DeskBuddy Posture Coach", locale: englishLocale)
+    static let description = IntentDescription(
+        LocalizedStringResource(
+            "Pauses automatic desk movement while this Focus is active.",
+            locale: englishLocale
+        )
+    )
+
+    @Parameter(
+        title: LocalizedStringResource("Pause Automatic Movement", locale: englishLocale),
+        default: false
+    )
+    var pauseAutomaticMovement: Bool
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(
+            title: LocalizedStringResource("DeskBuddy Posture Coach", locale: englishLocale),
+            subtitle: pauseAutomaticMovement
+                ? LocalizedStringResource("Automatic movement paused", locale: englishLocale)
+                : LocalizedStringResource("Automatic movement allowed", locale: englishLocale)
+        )
+    }
+
+    func perform() async throws -> some IntentResult {
+        await MainActor.run {
+            SettingsStore.shared.setFocusPausesAutomaticMovement(pauseAutomaticMovement)
+            PostureCoach.shared.refreshSchedule()
+        }
+        return .result()
+    }
+}
+
 struct MoveDeskToSittingIntent: AppIntent {
     static let title = LocalizedStringResource("Move Desk to Sitting Height", locale: englishLocale)
     static let description = IntentDescription(

@@ -9,6 +9,11 @@ enum DeskBuddyNotification {
 
 @MainActor
 final class PostureCoach: ObservableObject {
+    enum PauseReason: Equatable {
+        case meeting
+        case focus
+    }
+
     struct PendingMovement: Identifiable, Equatable {
         let id = UUID()
         let preset: DeskPreset
@@ -20,6 +25,9 @@ final class PostureCoach: ObservableObject {
     @Published private(set) var remainingSeconds = 0
     @Published private(set) var nextReminder: Date?
     @Published private(set) var nextScheduleStart: Date?
+    @Published private(set) var currentPosture: PresetKind = .sitting
+    @Published private(set) var nextPosture: PresetKind = .standing
+    @Published private(set) var pauseReason: PauseReason?
 
     private var evaluationTimer: Timer?
     private var countdownTask: Task<Void, Never>?
@@ -81,15 +89,23 @@ final class PostureCoach: ObservableObject {
         let settings = SettingsStore.shared
         guard settings.coachEnabled,
               settings.coachReminderEnabled || settings.automaticMovementEnabled else {
+            cancelPendingMovement()
             nextReminder = nil
             nextScheduleStart = nil
+            pauseReason = nil
             return
         }
 
         let now = Date()
+        let sitting = currentPostureIsSitting()
+        currentPosture = sitting ? .sitting : .standing
+        nextPosture = sitting ? .standing : .sitting
+
         guard isInsideActiveSchedule(settings: settings, at: now) else {
+            cancelPendingMovement()
             nextReminder = nil
             nextScheduleStart = nextActiveScheduleStart(settings: settings, after: now)
+            pauseReason = nil
             return
         }
         nextScheduleStart = nil
@@ -100,10 +116,17 @@ final class PostureCoach: ObservableObject {
             return
         }
 
-        let sitting = currentPostureIsSitting()
         let intervalMinutes = sitting ? settings.sittingIntervalMinutes : settings.standingIntervalMinutes
         let due = lastReminder.addingTimeInterval(Double(intervalMinutes * 60))
         nextReminder = due
+
+        if let reason = automaticMovementPauseReason(settings: settings) {
+            cancelPendingMovement()
+            pauseReason = reason
+            return
+        }
+        pauseReason = nil
+
         guard now >= due, pendingMovement == nil else { return }
 
         let targetKind: PresetKind = sitting ? .standing : .sitting
@@ -134,7 +157,11 @@ final class PostureCoach: ObservableObject {
                     self.countdownTask = nil
                     let target = self.pendingMovement?.preset
                     self.pendingMovement = nil
-                    if let target, DeskController.shared.state.isConnected {
+                    let settings = SettingsStore.shared
+                    if let reason = self.automaticMovementPauseReason(settings: settings) {
+                        self.pauseReason = reason
+                        self.remainingSeconds = 0
+                    } else if let target, DeskController.shared.state.isConnected {
                         DeskController.shared.move(to: target)
                     }
                     return
@@ -166,6 +193,18 @@ final class PostureCoach: ObservableObject {
             return true
         }
         return height < (sitting.heightCm + standing.heightCm) / 2
+    }
+
+    private func automaticMovementPauseReason(settings: SettingsStore) -> PauseReason? {
+        guard settings.automaticMovementEnabled else { return nil }
+        if settings.focusPausesAutomaticMovement {
+            return .focus
+        }
+        if settings.pauseAutomaticMovementDuringMeetings,
+           MeetingActivityMonitor.currentState().isActive {
+            return .meeting
+        }
+        return nil
     }
 
     private func isInsideActiveSchedule(settings: SettingsStore, at date: Date) -> Bool {

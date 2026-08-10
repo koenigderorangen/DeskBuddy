@@ -17,11 +17,12 @@
 DeskBuddy keeps everyday desk controls close without turning them into another dashboard. Connect over Bluetooth, see the current height at a glance, and move directly to the position you need.
 
 - **Return to the right height** — Save sitting, standing, minimum, maximum, and custom positions.
-- **Double-tap into position** — Tap the physical paddle twice to move directly to a saved height, or build your own tap sequences for more presets.
+- **Tap into position** — Use double up and double down, or build your own physical paddle sequences for any saved position.
 - **Stay in your flow** — Use global keyboard shortcuts or actions in Apple Shortcuts without opening the menu.
-- **Change posture on time** — Get gentle Posture Coach reminders with an optional cancelable movement countdown.
+- **Change posture on time** — See the current and next interval, get reminders, or use cancelable automatic movement.
+- **Keep meetings still** — Pause automatic movement while the camera, microphone, or a selected macOS Focus is active.
 - **See what matters** — Show the current height in centimeters or inches directly in the menu bar.
-- **Feel at home on macOS** — Native SwiftUI, Liquid Glass, launch at login, and automatic reconnection.
+- **Feel at home on macOS** — Native SwiftUI, Liquid Glass, launch at login, automatic reconnection, and Sparkle updates.
 - **Move manually when needed** — Press and hold to move, release to stop, or stop an active preset movement from the menu.
 
 ## Designed Around Your Routine
@@ -29,6 +30,8 @@ DeskBuddy keeps everyday desk controls close without turning them into another d
 ### Custom paddle gestures
 
 The IDÅSEN normally requires holding its physical paddle until the desk reaches the desired height. DeskBuddy starts with double up and double down, then lets you add, edit, and remove your own multi-tap sequences. Every sequence can target any saved position.
+
+An unambiguous sequence triggers as soon as its final tap ends. If one configured gesture is the beginning of another, DeskBuddy waits for the configurable continuation window before choosing the shorter gesture. A single paddle tap also cancels an active preset movement and immediately rearms gesture recognition.
 
 ### Quick movement
 
@@ -44,7 +47,17 @@ Assign global shortcuts to movement and presets, disable individual shortcuts wh
 
 ### Posture Coach
 
-Choose your active weekdays and reminder cadence. DeskBuddy can simply remind you or prepare an automatic move with a visible countdown that you can cancel at any time.
+Choose separate sitting and standing intervals plus the weekdays and hours when coaching is active. The menu shows the current-to-next posture and time remaining. DeskBuddy can simply remind you or prepare an automatic move with a visible countdown that you can cancel at any time.
+
+Automatic movement can pause while a camera or microphone is in use. You can also add DeskBuddy as a Focus Filter to individual macOS Focus modes: open **System Settings → Focus**, choose a Focus, and add DeskBuddy under **Focus Filters**.
+
+### Updates
+
+DeskBuddy can check for, download, and install signed updates through Sparkle. Automatic checks and downloads are independently configurable in **Settings → About**.
+
+## Privacy
+
+DeskBuddy only queries whether a camera or audio input device is running when meeting-aware movement pause is enabled. It never captures camera frames or microphone audio, cannot identify which app is using a device, and does not request camera or microphone capture access.
 
 ## Compatibility
 
@@ -71,9 +84,9 @@ If the desk moves unexpectedly, use DeskBuddy's red **Stop** button or the physi
 ./build-app.sh
 ```
 
-The app bundle is written to `outputs/DeskBuddy.app`. This command builds the same release configuration used by CI.
+The app bundle is written to `outputs/DeskBuddy.app`. With no flag, the script builds the same release configuration used by CI; `./build-app.sh --release` is the explicit equivalent.
 
-To include the development-only notification and Posture Coach testing controls, build with:
+To include development-only notification, Posture Coach, meeting detection, and panel-size testing controls, build with:
 
 ```sh
 ./build-app.sh --debug

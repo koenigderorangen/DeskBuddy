@@ -17,6 +17,10 @@ final class SettingsStore: ObservableObject {
     @Published var coachEnabled: Bool { didSet { defaults.set(coachEnabled, forKey: Keys.coachEnabled) } }
     @Published var coachReminderEnabled: Bool { didSet { defaults.set(coachReminderEnabled, forKey: Keys.coachReminderEnabled) } }
     @Published var automaticMovementEnabled: Bool { didSet { defaults.set(automaticMovementEnabled, forKey: Keys.automaticMovementEnabled) } }
+    @Published var pauseAutomaticMovementDuringMeetings: Bool {
+        didSet { defaults.set(pauseAutomaticMovementDuringMeetings, forKey: Keys.pauseAutomaticMovementDuringMeetings) }
+    }
+    @Published private(set) var focusPausesAutomaticMovement: Bool
     @Published var sittingIntervalMinutes: Int { didSet { defaults.set(sittingIntervalMinutes, forKey: Keys.sittingInterval) } }
     @Published var standingIntervalMinutes: Int { didSet { defaults.set(standingIntervalMinutes, forKey: Keys.standingInterval) } }
     @Published var activeStartHour: Int { didSet { defaults.set(activeStartHour, forKey: Keys.activeStartHour) } }
@@ -26,6 +30,9 @@ final class SettingsStore: ObservableObject {
     @Published var activeWeekdays: Set<Int> { didSet { save(activeWeekdays, key: Keys.activeWeekdays) } }
     @Published var movementCountdownSeconds: Int { didSet { defaults.set(movementCountdownSeconds, forKey: Keys.countdown) } }
     @Published var paddleGesturesEnabled: Bool { didSet { defaults.set(paddleGesturesEnabled, forKey: Keys.doubleTap) } }
+    @Published var paddleGestureContinuationDelay: Double {
+        didSet { defaults.set(paddleGestureContinuationDelay, forKey: Keys.paddleGestureContinuationDelay) }
+    }
     @Published var paddleGestureRules: [PaddleGestureRule] { didSet { save(paddleGestureRules, key: Keys.paddleGestureRules) } }
     @Published var shortcuts: [String: KeyboardShortcut] { didSet { save(shortcuts, key: Keys.shortcutsConfig) } }
     @Published var disabledShortcutActions: Set<String> { didSet { save(disabledShortcutActions, key: Keys.disabledShortcuts) } }
@@ -46,6 +53,8 @@ final class SettingsStore: ObservableObject {
         static let coachEnabled = "coachEnabled"
         static let coachReminderEnabled = "coachReminderEnabled"
         static let automaticMovementEnabled = "automaticMovementEnabled"
+        static let pauseAutomaticMovementDuringMeetings = "pauseAutomaticMovementDuringMeetings"
+        static let focusPausesAutomaticMovement = "focusPausesAutomaticMovement"
         static let sittingInterval = "sittingIntervalMinutes"
         static let standingInterval = "standingIntervalMinutes"
         static let activeStartHour = "activeStartHour"
@@ -55,6 +64,8 @@ final class SettingsStore: ObservableObject {
         static let activeWeekdays = "activeWeekdays"
         static let countdown = "movementCountdownSeconds"
         static let doubleTap = "doubleTapEnabled"
+        static let paddleGestureContinuationDelay = "paddleGestureContinuationDelay"
+        static let paddleGestureContinuationDelaySecondsMigrated = "paddleGestureContinuationDelaySecondsMigrated"
         static let paddleGestureRules = "paddleGestureRules"
         static let shortcutsConfig = "shortcutsConfig"
         static let disabledShortcuts = "disabledShortcuts"
@@ -96,6 +107,8 @@ final class SettingsStore: ObservableObject {
         coachEnabled = defaults.bool(forKey: Keys.coachEnabled)
         coachReminderEnabled = defaults.object(forKey: Keys.coachReminderEnabled) as? Bool ?? true
         automaticMovementEnabled = defaults.bool(forKey: Keys.automaticMovementEnabled)
+        pauseAutomaticMovementDuringMeetings = defaults.bool(forKey: Keys.pauseAutomaticMovementDuringMeetings)
+        focusPausesAutomaticMovement = defaults.bool(forKey: Keys.focusPausesAutomaticMovement)
         sittingIntervalMinutes = defaults.object(forKey: Keys.sittingInterval) as? Int ?? 45
         standingIntervalMinutes = defaults.object(forKey: Keys.standingInterval) as? Int ?? 20
         activeStartHour = defaults.object(forKey: Keys.activeStartHour) as? Int ?? 9
@@ -105,6 +118,15 @@ final class SettingsStore: ObservableObject {
         activeWeekdays = Self.load(Set<Int>.self, key: Keys.activeWeekdays) ?? Set(2...6)
         movementCountdownSeconds = defaults.object(forKey: Keys.countdown) as? Int ?? 15
         paddleGesturesEnabled = defaults.bool(forKey: Keys.doubleTap)
+        var storedContinuationDelay = defaults.object(forKey: Keys.paddleGestureContinuationDelay) as? Double ?? 0.4
+        if !defaults.bool(forKey: Keys.paddleGestureContinuationDelaySecondsMigrated) {
+            if storedContinuationDelay == 0.04 {
+                storedContinuationDelay = 0.4
+                defaults.set(storedContinuationDelay, forKey: Keys.paddleGestureContinuationDelay)
+            }
+            defaults.set(true, forKey: Keys.paddleGestureContinuationDelaySecondsMigrated)
+        }
+        paddleGestureContinuationDelay = min(max(storedContinuationDelay, 0), 4)
         let sittingPresetID = loadedPresets.first(where: { $0.resolvedKind == .sitting })!.id
         let standingPresetID = loadedPresets.first(where: { $0.resolvedKind == .standing })!.id
         var gestureRules = Self.load([PaddleGestureRule].self, key: Keys.paddleGestureRules) ?? [
@@ -126,6 +148,11 @@ final class SettingsStore: ObservableObject {
             return String(format: "%.*f in", digits, centimeters / 2.54)
         }
         return String(format: "%.*f cm", digits, centimeters)
+    }
+
+    func setFocusPausesAutomaticMovement(_ paused: Bool) {
+        focusPausesAutomaticMovement = paused
+        defaults.set(paused, forKey: Keys.focusPausesAutomaticMovement)
     }
 
     func shortcut(for action: ShortcutAction) -> KeyboardShortcut {

@@ -11,7 +11,6 @@ final class DeskController: NSObject, ObservableObject {
     static let targetRearmInterval: TimeInterval = 0.8
     static let hardwareTapMaximumDuration: TimeInterval = 1.3
     static let hardwareTapInterval: TimeInterval = 1.4
-    static let hardwareGestureSettleDelay: Duration = .milliseconds(400)
 
     @Published private(set) var state: ConnectionState = .idle
     @Published private(set) var discoveredDesks: [SavedDesk] = []
@@ -56,7 +55,6 @@ final class DeskController: NSObject, ObservableObject {
     private var lastHardwareTapAt: Date?
     private var pendingPaddleGestureRule: PaddleGestureRule?
     private var pendingHardwareGestureTask: Task<Void, Never>?
-    private var hardwareGestureMovementTask: Task<Void, Never>?
 
     private override init() {
         super.init()
@@ -481,8 +479,6 @@ final class DeskController: NSObject, ObservableObject {
         }
 
         if let direction, hardwareMotionDirection == nil {
-            hardwareGestureMovementTask?.cancel()
-            hardwareGestureMovementTask = nil
             pendingHardwareGestureTask?.cancel()
             pendingHardwareGestureTask = nil
             hardwareMotionDirection = direction
@@ -544,10 +540,13 @@ final class DeskController: NSObject, ObservableObject {
     private func deferPaddleGesture(_ rule: PaddleGestureRule?) {
         pendingPaddleGestureRule = rule
         let expectedSequence = hardwareTapSequence
+        let continuationDelay = rule == nil
+            ? Self.hardwareTapInterval
+            : settings.paddleGestureContinuationDelay
         pendingHardwareGestureTask?.cancel()
         pendingHardwareGestureTask = Task { @MainActor [weak self] in
             do {
-                try await Task.sleep(for: .seconds(Self.hardwareTapInterval))
+            try await Task.sleep(for: .seconds(continuationDelay))
             } catch {
                 return
             }
@@ -566,28 +565,10 @@ final class DeskController: NSObject, ObservableObject {
               }),
               let preset = settings.preset(for: currentRule) else { return }
         record("\(currentRule.title) detected: \(preset.name)")
-        hardwareGestureMovementTask?.cancel()
-        hardwareGestureMovementTask = Task { @MainActor [weak self] in
-            do {
-                try await Task.sleep(for: Self.hardwareGestureSettleDelay)
-            } catch {
-                return
-            }
-            guard let self,
-                  self.state.isConnected,
-                  self.settings.paddleGesturesEnabled,
-                  let currentRule = self.settings.paddleGestureRules.first(where: {
-                      $0.id == rule.id && $0.directions == rule.directions
-                  }),
-                  let currentPreset = self.settings.preset(for: currentRule) else { return }
-            self.hardwareGestureMovementTask = nil
-            self.move(to: currentPreset)
-        }
+        move(to: preset)
     }
 
     private func resetHardwareGestureRecognition() {
-        hardwareGestureMovementTask?.cancel()
-        hardwareGestureMovementTask = nil
         hardwareMotionStartedAt = nil
         hardwareMotionDirection = nil
         resetHardwareTapSequence()
@@ -752,6 +733,14 @@ extension DeskController: @preconcurrency CBPeripheralDelegate {
         speedCmPerSecond = position.speedCmPerSecond
         processHardwareGesture(speed: position.speedCmPerSecond)
         acknowledgeTargetMotion(with: position)
+        if targetMotionStarted,
+           let target = targetHeightCm,
+           abs(position.heightCm - target) > 0.5,
+              position.speedCmPerSecond == 0 {
+            record("Target movement stopped from the physical paddle")
+            stopMovement()
+            return
+        }
         if let target = targetHeightCm,
            abs(position.heightCm - target) <= 0.5,
            abs(position.speedCmPerSecond) < 0.5 {

@@ -84,38 +84,74 @@ struct MenuContentView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Text(connectedDeskName)
-                .font(.headline)
-                .lineLimit(1)
-
-            if controller.state.isConnected {
-                Circle()
-                    .fill(DeskBuddyDesign.connected)
-                    .frame(width: 7, height: 7)
-                    .help(controller.state.title)
-            } else {
-                Text(controller.state.title)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+        ZStack {
+            HStack(spacing: 10) {
+                Text(connectedDeskName)
+                    .font(.headline)
                     .lineLimit(1)
+
+                if controller.state.isConnected {
+                    Circle()
+                        .fill(DeskBuddyDesign.connected)
+                        .frame(width: 7, height: 7)
+                        .help(controller.state.title)
+                } else {
+                    Text(controller.state.title)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Button {
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                    openSettings()
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.glass(.regular.tint(DeskBuddyDesign.trayGlassTint)))
+                .help("Settings")
             }
 
-            Spacer()
-
-            Button {
-                NSApplication.shared.activate(ignoringOtherApps: true)
-                openSettings()
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 28, height: 28)
+            if controller.state.isConnected,
+               settings.coachEnabled,
+               settings.coachReminderEnabled || settings.automaticMovementEnabled {
+                coachHeaderStatus
             }
-            .buttonStyle(.glass(.regular.tint(DeskBuddyDesign.trayGlassTint)))
-            .help("Settings")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    private var coachHeaderStatus: some View {
+        VStack(alignment: .center, spacing: 1) {
+            Text("\(postureTitle(coach.currentPosture)) → \(postureTitle(coach.nextPosture))")
+                .font(.caption2.weight(.semibold))
+            Group {
+                if coach.pendingMovement != nil {
+                    Text("Moves in \(coach.remainingSeconds)s")
+                        .monospacedDigit()
+                } else if let pauseReason = coach.pauseReason {
+                    Text(pauseReason == .meeting ? "Paused · Meeting" : "Paused · Focus")
+                } else if let nextReminder = coach.nextReminder {
+                    Text(nextReminder, style: .timer)
+                        .monospacedDigit()
+                } else if coach.nextScheduleStart != nil {
+                    Text("Outside schedule")
+                } else {
+                    Text("Paused")
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Posture Coach: \(postureTitle(coach.currentPosture)) to \(postureTitle(coach.nextPosture))")
     }
 
     private var connectedContent: some View {
@@ -340,6 +376,10 @@ struct MenuContentView: View {
             return desk.name
         }
         return "DeskBuddy"
+    }
+
+    private func postureTitle(_ posture: PresetKind) -> String {
+        posture == .standing ? "Stand" : "Sit"
     }
 
     private func openDeskSettings() {

@@ -51,6 +51,7 @@ struct SettingsView: View {
 #if DEBUG
     @AppStorage(DeskBuddyDesign.debugPanelWidthKey) private var debugPanelWidth = Double(DeskBuddyDesign.contentWidth)
     @AppStorage(DeskBuddyDesign.debugPanelHeightKey) private var debugPanelHeight = Double(DeskBuddyDesign.contentHeight)
+    @State private var debugMeetingActivityState: MeetingActivityState?
 #endif
 
     var body: some View {
@@ -166,9 +167,26 @@ struct SettingsView: View {
         settingsScroll {
             settingsGroup(
                 "Physical Paddle Gestures",
-                subtitle: "Build sequences of two or more short paddle taps and assign each one to a saved position."
+                subtitle: "The continuation window only adds a wait when the current taps could become a longer configured gesture."
             ) {
                 settingsToggleRow("Enable paddle gestures", isOn: $settings.paddleGesturesEnabled)
+
+                settingsControlRow("Wait for possible extension") {
+                    HStack(spacing: 10) {
+                        Slider(
+                            value: $settings.paddleGestureContinuationDelay,
+                            in: 0...4,
+                            step: 0.1
+                        )
+                        Text(settings.paddleGestureContinuationDelay, format: .number.precision(.fractionLength(1)))
+                            .monospacedDigit()
+                        Text("s")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .disabled(!settings.paddleGesturesEnabled)
+                .opacity(settings.paddleGesturesEnabled ? 1 : 0.5)
 
                 Group {
                     if settings.paddleGestureRules.isEmpty {
@@ -286,6 +304,20 @@ struct SettingsView: View {
                     .disabled(!settings.coachEnabled)
 
                 if settings.automaticMovementEnabled {
+                    settingsToggleRow(
+                        "Pause while camera or microphone is in use",
+                        isOn: $settings.pauseAutomaticMovementDuringMeetings
+                    )
+                    HStack(spacing: 8) {
+                        Image(systemName: settings.focusPausesAutomaticMovement ? "moon.fill" : "moon")
+                            .foregroundStyle(settings.focusPausesAutomaticMovement ? Color.accentColor : .secondary)
+                        Text(settings.focusPausesAutomaticMovement
+                            ? "Paused by the current Focus"
+                            : "In System Settings, open Focus, choose a Focus, then add DeskBuddy under Focus Filters.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
                     settingsControlRow("Countdown before moving") {
                         HStack(spacing: 10) {
                             Text("\(settings.movementCountdownSeconds) seconds")
@@ -313,29 +345,41 @@ struct SettingsView: View {
 
             settingsGroup("Schedule", subtitle: "The coach stays quiet outside these hours.") {
                 settingsControlRow("From") {
-                    DatePicker(
-                        "",
-                        selection: scheduleTimeBinding(
-                            hour: $settings.activeStartHour,
-                            minute: $settings.activeStartMinute
-                        ),
-                        displayedComponents: .hourAndMinute
-                    )
-                    .labelsHidden()
-                    .datePickerStyle(.field)
+                    HStack(spacing: 8) {
+                        DatePicker(
+                            "",
+                            selection: scheduleTimeBinding(
+                                hour: $settings.activeStartHour,
+                                minute: $settings.activeStartMinute
+                            ),
+                            displayedComponents: .hourAndMinute
+                        )
+                        .labelsHidden()
+                        .datePickerStyle(.field)
+                        Stepper("", value: $settings.activeStartHour, in: 0...23)
+                            .labelsHidden()
+                            .help("Adjust start hour")
+                            .accessibilityLabel("Adjust start hour")
+                    }
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 settingsControlRow("To") {
-                    DatePicker(
-                        "",
-                        selection: scheduleTimeBinding(
-                            hour: $settings.activeEndHour,
-                            minute: $settings.activeEndMinute
-                        ),
-                        displayedComponents: .hourAndMinute
-                    )
-                    .labelsHidden()
-                    .datePickerStyle(.field)
+                    HStack(spacing: 8) {
+                        DatePicker(
+                            "",
+                            selection: scheduleTimeBinding(
+                                hour: $settings.activeEndHour,
+                                minute: $settings.activeEndMinute
+                            ),
+                            displayedComponents: .hourAndMinute
+                        )
+                        .labelsHidden()
+                        .datePickerStyle(.field)
+                        Stepper("", value: $settings.activeEndHour, in: 0...23)
+                            .labelsHidden()
+                            .help("Adjust end hour")
+                            .accessibilityLabel("Adjust end hour")
+                    }
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 settingsControlRow("Active days") {
@@ -380,12 +424,26 @@ struct SettingsView: View {
                     }
                     .disabled(!controller.state.isConnected)
                 }
+                settingsControlRow("Meeting pause") {
+                    VStack(alignment: .trailing, spacing: 6) {
+                        Button("Check Camera & Microphone", systemImage: "arrow.clockwise") {
+                            checkMeetingActivity()
+                        }
+                        if let debugMeetingActivityState {
+                            Text(debugMeetingActivityDescription(debugMeetingActivityState))
+                                .font(.caption)
+                                .foregroundStyle(debugMeetingActivityState.isActive ? .primary : .secondary)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+                }
             }
 #endif
         }
     .onChange(of: settings.coachEnabled) { _, _ in coach.refreshSchedule() }
     .onChange(of: settings.coachReminderEnabled) { _, _ in coach.refreshSchedule() }
     .onChange(of: settings.automaticMovementEnabled) { _, _ in coach.refreshSchedule() }
+    .onChange(of: settings.pauseAutomaticMovementDuringMeetings) { _, _ in coach.refreshSchedule() }
     .onChange(of: settings.sittingIntervalMinutes) { _, _ in coach.refreshSchedule() }
     .onChange(of: settings.standingIntervalMinutes) { _, _ in coach.refreshSchedule() }
     .onChange(of: settings.activeStartHour) { _, _ in coach.refreshSchedule() }
@@ -632,6 +690,37 @@ struct SettingsView: View {
     }
 
 #if DEBUG
+    private func checkMeetingActivity() {
+        debugMeetingActivityState = MeetingActivityMonitor.currentState()
+        coach.refreshSchedule()
+    }
+
+    private func debugMeetingActivityDescription(_ activity: MeetingActivityState) -> String {
+        guard activity.isActive else {
+            return "No camera or microphone activity detected"
+        }
+
+        let source: String
+        if activity.cameraIsActive && activity.microphoneIsActive {
+            source = "Camera and microphone active"
+        } else if activity.cameraIsActive {
+            source = "Camera active"
+        } else {
+            source = "Microphone active"
+        }
+
+        if !settings.automaticMovementEnabled {
+            return "\(source) · Automatic movement is off"
+        }
+        if !settings.pauseAutomaticMovementDuringMeetings {
+            return "\(source) · Meeting pause is off"
+        }
+        if coach.pauseReason == .meeting {
+            return "\(source) · Pause verified"
+        }
+        return "\(source) · Will pause during the active schedule"
+    }
+
     private func debugPanelSizeRow(
         _ title: String,
         value: Binding<Double>,
