@@ -10,32 +10,17 @@ struct DeskPreset: Codable, Identifiable, Equatable {
     var name: String
     var heightCm: Double
     var symbol: String
-    var kind: PresetKind? = .custom
+    var kind: PresetKind = .custom
 
     static let defaults = [
         DeskPreset(name: "Sit", heightCm: 72, symbol: "chair", kind: .sitting),
-        DeskPreset(name: "Stand", heightCm: 110, symbol: "figure.stand", kind: .standing),
-        DeskPreset(name: "Min", heightCm: DeskProtocol.minimumHeightCm, symbol: "arrow.down.to.line", kind: .minimum),
-        DeskPreset(name: "Max", heightCm: DeskProtocol.maximumHeightCm, symbol: "arrow.up.to.line", kind: .maximum)
+        DeskPreset(name: "Stand", heightCm: 110, symbol: "figure.stand", kind: .standing)
     ]
-
-    var resolvedKind: PresetKind {
-        if let kind { return kind }
-        switch name.lowercased() {
-        case "sit": return .sitting
-        case "stand": return .standing
-        case "min": return .minimum
-        case "max": return .maximum
-        default: return .custom
-        }
-    }
 }
 
 enum PresetKind: String, Codable, CaseIterable {
     case sitting
     case standing
-    case minimum
-    case maximum
     case custom
 }
 

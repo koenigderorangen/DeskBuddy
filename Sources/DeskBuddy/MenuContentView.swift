@@ -316,7 +316,7 @@ struct MenuContentView: View {
             Button("Move Right", systemImage: "arrow.right") {
                 settings.movePreset(preset, offset: 1)
             }
-            if preset.resolvedKind == .custom {
+            if preset.kind == .custom {
                 Divider()
                 Button("Delete", systemImage: "trash", role: .destructive) { settings.deletePreset(preset) }
             }

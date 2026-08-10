@@ -79,7 +79,7 @@ final class PostureCoach: ObservableObject {
     func triggerTestCountdown() {
         let settings = SettingsStore.shared
         let targetKind: PresetKind = currentPostureIsSitting() ? .standing : .sitting
-        guard let target = settings.presets.first(where: { $0.resolvedKind == targetKind }) else { return }
+        guard let target = settings.presets.first(where: { $0.kind == targetKind }) else { return }
         sendReminder(target: target, includesCountdown: true)
         startCountdown(to: target, seconds: settings.movementCountdownSeconds)
     }
@@ -130,7 +130,7 @@ final class PostureCoach: ObservableObject {
         guard now >= due, pendingMovement == nil else { return }
 
         let targetKind: PresetKind = sitting ? .standing : .sitting
-        guard let target = settings.presets.first(where: { $0.resolvedKind == targetKind }) else { return }
+        guard let target = settings.presets.first(where: { $0.kind == targetKind }) else { return }
 
         if settings.coachReminderEnabled || settings.automaticMovementEnabled {
             sendReminder(target: target, includesCountdown: settings.automaticMovementEnabled)
@@ -188,8 +188,8 @@ final class PostureCoach: ObservableObject {
     private func currentPostureIsSitting() -> Bool {
         let settings = SettingsStore.shared
         guard let height = DeskController.shared.heightCm,
-              let sitting = settings.presets.first(where: { $0.resolvedKind == .sitting }),
-              let standing = settings.presets.first(where: { $0.resolvedKind == .standing }) else {
+              let sitting = settings.presets.first(where: { $0.kind == .sitting }),
+              let standing = settings.presets.first(where: { $0.kind == .standing }) else {
             return true
         }
         return height < (sitting.heightCm + standing.heightCm) / 2

@@ -69,30 +69,12 @@ final class SettingsStore: ObservableObject {
         static let paddleGestureRules = "paddleGestureRules"
         static let shortcutsConfig = "shortcutsConfig"
         static let disabledShortcuts = "disabledShortcuts"
-        static let englishPresetNamesMigrated = "englishPresetNamesMigrated"
         static let onboarding = "hasCompletedOnboarding"
     }
 
     private init() {
         var loadedPresets = Self.load([DeskPreset].self, key: Keys.presets) ?? DeskPreset.defaults
-        if !defaults.bool(forKey: Keys.englishPresetNamesMigrated) {
-            for index in loadedPresets.indices {
-                if loadedPresets[index].resolvedKind == .sitting
-                    || (loadedPresets[index].kind == nil && loadedPresets[index].symbol == "chair") {
-                    loadedPresets[index].name = "Sit"
-                    loadedPresets[index].kind = .sitting
-                } else if loadedPresets[index].resolvedKind == .standing
-                    || (loadedPresets[index].kind == nil && loadedPresets[index].symbol == "figure.stand") {
-                    loadedPresets[index].name = "Stand"
-                    loadedPresets[index].kind = .standing
-                }
-            }
-            if let data = try? JSONEncoder().encode(loadedPresets) {
-                defaults.set(data, forKey: Keys.presets)
-            }
-            defaults.set(true, forKey: Keys.englishPresetNamesMigrated)
-        }
-        for required in DeskPreset.defaults where !loadedPresets.contains(where: { $0.resolvedKind == required.resolvedKind }) {
+        for required in DeskPreset.defaults where !loadedPresets.contains(where: { $0.kind == required.kind }) {
             loadedPresets.append(required)
         }
         presets = loadedPresets
@@ -127,8 +109,8 @@ final class SettingsStore: ObservableObject {
             defaults.set(true, forKey: Keys.paddleGestureContinuationDelaySecondsMigrated)
         }
         paddleGestureContinuationDelay = min(max(storedContinuationDelay, 0), 4)
-        let sittingPresetID = loadedPresets.first(where: { $0.resolvedKind == .sitting })!.id
-        let standingPresetID = loadedPresets.first(where: { $0.resolvedKind == .standing })!.id
+        let sittingPresetID = loadedPresets.first(where: { $0.kind == .sitting })!.id
+        let standingPresetID = loadedPresets.first(where: { $0.kind == .standing })!.id
         var gestureRules = Self.load([PaddleGestureRule].self, key: Keys.paddleGestureRules) ?? [
             PaddleGestureRule(directions: [.down, .down], presetID: sittingPresetID),
             PaddleGestureRule(directions: [.up, .up], presetID: standingPresetID)
@@ -206,7 +188,7 @@ final class SettingsStore: ObservableObject {
     }
 
     func deletePreset(_ preset: DeskPreset) {
-        guard preset.resolvedKind == .custom else { return }
+        guard preset.kind == .custom else { return }
         presets.removeAll { $0.id == preset.id }
         paddleGestureRules.removeAll { $0.presetID == preset.id }
     }

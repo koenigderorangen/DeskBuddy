@@ -3,7 +3,7 @@ import Testing
 @testable import DeskBuddy
 
 @Test func defaultPresetsUseEnglishNames() {
-    #expect(DeskPreset.defaults.map(\.name) == ["Sit", "Stand", "Min", "Max"])
+    #expect(DeskPreset.defaults.map(\.name) == ["Sit", "Stand"])
 }
 
 @Test func decodesMinimumHeightAndStoppedSpeed() {
