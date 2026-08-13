@@ -8,6 +8,7 @@ enum DeskBuddyNotification {
     static let postureReminderCategory = "POSTURE_REMINDER"
     static let moveToReminderPresetAction = "MOVE_TO_REMINDER_PRESET"
     static let presetIDKey = "presetID"
+    static let postureCoachRequest = "POSTURE_COACH_REMINDER"
 }
 
 @MainActor
@@ -34,9 +35,23 @@ final class PostureCoach: ObservableObject {
 
     private var evaluationTimer: Timer?
     private var countdownTask: Task<Void, Never>?
+    private var positionObservation: AnyCancellable?
+    private var trackedPosture: PresetKind?
     private let lastReminderKey = "coachLastReminder"
+    private let trackedPostureKey = "coachTrackedPosture"
 
     private init() {
+        if let rawPosture = UserDefaults.standard.string(forKey: trackedPostureKey),
+           let posture = PresetKind(rawValue: rawPosture),
+           posture == .sitting || posture == .standing {
+            trackedPosture = posture
+            currentPosture = posture
+            nextPosture = posture == .sitting ? .standing : .sitting
+        }
+        positionObservation = DeskController.shared.$speedCmPerSecond
+            .sink { [weak self] speed in
+                self?.deskPositionDidChange(height: DeskController.shared.heightCm, speed: speed)
+            }
         evaluationTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.evaluate() }
         }
@@ -56,6 +71,7 @@ final class PostureCoach: ObservableObject {
 
     func resetSchedule() {
         cancelPendingMovement()
+        removeCoachNotifications()
         UserDefaults.standard.set(Date(), forKey: lastReminderKey)
         evaluate()
     }
@@ -183,11 +199,52 @@ final class PostureCoach: ObservableObject {
         }
         content.sound = .default
         UNUserNotificationCenter.current().add(
-            UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+            UNNotificationRequest(
+                identifier: DeskBuddyNotification.postureCoachRequest,
+                content: content,
+                trigger: nil
+            )
         )
     }
 
+    private func deskPositionDidChange(height: Double?, speed: Double) {
+        guard abs(speed) < 0.05,
+              let height,
+              let posture = postureAtPreset(height: height),
+              posture != trackedPosture else { return }
+
+                trackedPosture = posture
+        currentPosture = posture
+        nextPosture = posture == .sitting ? .standing : .sitting
+        UserDefaults.standard.set(posture.rawValue, forKey: trackedPostureKey)
+        UserDefaults.standard.set(Date(), forKey: lastReminderKey)
+        cancelPendingMovement()
+        removeCoachNotifications()
+        evaluate()
+    }
+
+    private func postureAtPreset(height: Double) -> PresetKind? {
+        let candidates = SettingsStore.shared.presets.filter {
+            $0.kind == .sitting || $0.kind == .standing
+        }
+        return candidates
+            .map { (posture: $0.kind, distance: abs($0.heightCm - height)) }
+            .filter { $0.distance <= 0.5 }
+            .min(by: { $0.distance < $1.distance })?
+            .posture
+    }
+
+    private func removeCoachNotifications() {
+        let center = UNUserNotificationCenter.current()
+        let identifiers = [DeskBuddyNotification.postureCoachRequest]
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        center.removeDeliveredNotifications(withIdentifiers: identifiers)
+    }
+
     private func currentPostureIsSitting() -> Bool {
+        if let trackedPosture {
+            return trackedPosture == .sitting
+        }
         let settings = SettingsStore.shared
         guard let height = DeskController.shared.heightCm,
               let sitting = settings.presets.first(where: { $0.kind == .sitting }),
