@@ -5,6 +5,9 @@ import UserNotifications
 enum DeskBuddyNotification {
     static let automaticMovementCategory = "AUTOMATIC_MOVEMENT"
     static let stopAutomaticMovementAction = "STOP_AUTOMATIC_MOVEMENT"
+    static let postureReminderCategory = "POSTURE_REMINDER"
+    static let moveToReminderPresetAction = "MOVE_TO_REMINDER_PRESET"
+    static let presetIDKey = "presetID"
 }
 
 @MainActor
@@ -63,16 +66,13 @@ final class PostureCoach: ObservableObject {
 
 #if DEBUG
     func sendTestNotification() {
+        let settings = SettingsStore.shared
+        let targetKind: PresetKind = currentPostureIsSitting() ? .standing : .sitting
+        guard let target = settings.presets.first(where: { $0.kind == targetKind }) else { return }
         Task {
             let center = UNUserNotificationCenter.current()
             _ = try? await center.requestAuthorization(options: [.alert, .sound])
-            let content = UNMutableNotificationContent()
-            content.title = "DeskBuddy Test Notification"
-            content.body = "Notifications are working in this development build."
-            content.sound = .default
-            try? await center.add(
-                UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-            )
+            sendReminder(target: target, includesCountdown: false)
         }
     }
 
@@ -178,6 +178,8 @@ final class PostureCoach: ObservableObject {
             content.categoryIdentifier = DeskBuddyNotification.automaticMovementCategory
         } else {
             content.body = "How about \(target.name.lowercased()) now?"
+            content.categoryIdentifier = DeskBuddyNotification.postureReminderCategory
+            content.userInfo[DeskBuddyNotification.presetIDKey] = target.id.uuidString
         }
         content.sound = .default
         UNUserNotificationCenter.current().add(

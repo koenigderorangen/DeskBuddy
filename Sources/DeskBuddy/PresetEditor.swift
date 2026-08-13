@@ -102,9 +102,11 @@ struct PresetEditorView: View {
                         .monospacedDigit()
                 }
                 Slider(
-                    value: $model.draft.heightCm,
-                    in: DeskProtocol.minimumHeightCm...DeskProtocol.maximumHeightCm,
-                    step: 0.1
+                    value: Binding(
+                        get: { model.draft.heightCm },
+                        set: { model.draft.heightCm = ($0 * 10).rounded() / 10 }
+                    ),
+                    in: DeskProtocol.minimumHeightCm...DeskProtocol.maximumHeightCm
                 )
                 HStack {
                     Text("62 cm")

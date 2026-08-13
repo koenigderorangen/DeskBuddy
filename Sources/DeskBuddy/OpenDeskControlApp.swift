@@ -18,6 +18,16 @@ final class DeskBuddyAppDelegate: NSObject, NSApplicationDelegate, UNUserNotific
                     )
                 ],
                 intentIdentifiers: []
+            ),
+            UNNotificationCategory(
+                identifier: DeskBuddyNotification.postureReminderCategory,
+                actions: [
+                    UNNotificationAction(
+                        identifier: DeskBuddyNotification.moveToReminderPresetAction,
+                        title: "Move Desk"
+                    )
+                ],
+                intentIdentifiers: []
             )
         ])
         let workspaceNotifications = NSWorkspace.shared.notificationCenter
@@ -64,10 +74,23 @@ final class DeskBuddyAppDelegate: NSObject, NSApplicationDelegate, UNUserNotific
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        guard response.actionIdentifier == DeskBuddyNotification.stopAutomaticMovementAction else { return }
-        await MainActor.run {
-            PostureCoach.shared.cancelPendingMovement()
-            DeskController.shared.stopMovement()
+        switch response.actionIdentifier {
+        case DeskBuddyNotification.stopAutomaticMovementAction:
+            await MainActor.run {
+                PostureCoach.shared.cancelPendingMovement()
+                DeskController.shared.stopMovement()
+            }
+        case DeskBuddyNotification.moveToReminderPresetAction:
+            guard let rawPresetID = response.notification.request.content.userInfo[
+                DeskBuddyNotification.presetIDKey
+            ] as? String,
+                  let presetID = UUID(uuidString: rawPresetID) else { return }
+            await MainActor.run {
+                guard let preset = SettingsStore.shared.presets.first(where: { $0.id == presetID }) else { return }
+                DeskController.shared.move(to: preset)
+            }
+        default:
+            return
         }
     }
 }

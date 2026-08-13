@@ -171,12 +171,16 @@ struct SettingsView: View {
             ) {
                 settingsToggleRow("Enable paddle gestures", isOn: $settings.paddleGesturesEnabled)
 
-                settingsControlRow("Wait for possible extension") {
+                settingsControlRow("Gesture extension delay") {
                     HStack(spacing: 10) {
                         Slider(
-                            value: $settings.paddleGestureContinuationDelay,
-                            in: 0...4,
-                            step: 0.1
+                            value: Binding(
+                                get: { settings.paddleGestureContinuationDelay },
+                                set: {
+                                    settings.paddleGestureContinuationDelay = max(($0 * 10).rounded() / 10, 0.1)
+                                }
+                            ),
+                            in: 0.1...4
                         )
                         Text(settings.paddleGestureContinuationDelay, format: .number.precision(.fractionLength(1)))
                             .monospacedDigit()
@@ -414,7 +418,7 @@ struct SettingsView: View {
                 subtitle: "These controls are compiled only into development builds."
             ) {
                 settingsControlRow("Notification") {
-                    Button("Send Test Notification", systemImage: "bell.badge") {
+                    Button("Send Reminder Notification", systemImage: "bell.badge") {
                         coach.sendTestNotification()
                     }
                 }

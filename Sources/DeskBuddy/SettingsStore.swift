@@ -65,7 +65,6 @@ final class SettingsStore: ObservableObject {
         static let countdown = "movementCountdownSeconds"
         static let doubleTap = "doubleTapEnabled"
         static let paddleGestureContinuationDelay = "paddleGestureContinuationDelay"
-        static let paddleGestureContinuationDelaySecondsMigrated = "paddleGestureContinuationDelaySecondsMigrated"
         static let paddleGestureRules = "paddleGestureRules"
         static let shortcutsConfig = "shortcutsConfig"
         static let disabledShortcuts = "disabledShortcuts"
@@ -100,15 +99,8 @@ final class SettingsStore: ObservableObject {
         activeWeekdays = Self.load(Set<Int>.self, key: Keys.activeWeekdays) ?? Set(2...6)
         movementCountdownSeconds = defaults.object(forKey: Keys.countdown) as? Int ?? 15
         paddleGesturesEnabled = defaults.bool(forKey: Keys.doubleTap)
-        var storedContinuationDelay = defaults.object(forKey: Keys.paddleGestureContinuationDelay) as? Double ?? 0.4
-        if !defaults.bool(forKey: Keys.paddleGestureContinuationDelaySecondsMigrated) {
-            if storedContinuationDelay == 0.04 {
-                storedContinuationDelay = 0.4
-                defaults.set(storedContinuationDelay, forKey: Keys.paddleGestureContinuationDelay)
-            }
-            defaults.set(true, forKey: Keys.paddleGestureContinuationDelaySecondsMigrated)
-        }
-        paddleGestureContinuationDelay = min(max(storedContinuationDelay, 0), 4)
+        let storedContinuationDelay = defaults.object(forKey: Keys.paddleGestureContinuationDelay) as? Double ?? 0.4
+        paddleGestureContinuationDelay = min(max(storedContinuationDelay, 0.1), 4)
         let sittingPresetID = loadedPresets.first(where: { $0.kind == .sitting })!.id
         let standingPresetID = loadedPresets.first(where: { $0.kind == .standing })!.id
         var gestureRules = Self.load([PaddleGestureRule].self, key: Keys.paddleGestureRules) ?? [
