@@ -242,6 +242,10 @@ final class DeskController: NSObject, ObservableObject {
         """
     }
 
+    func recordDiagnosticEvent(_ message: String) {
+        record(message)
+    }
+
     func startManual(_ direction: ManualDirection) {
         guard state.isConnected, commandCharacteristic != nil else { return }
         stopTimers(sendStop: false)

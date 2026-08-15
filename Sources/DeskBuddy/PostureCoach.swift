@@ -37,6 +37,7 @@ final class PostureCoach: ObservableObject {
     private var countdownTask: Task<Void, Never>?
     private var positionObservation: AnyCancellable?
     private var trackedPosture: PresetKind?
+    private var lastDiagnosticState: String?
     private let lastReminderKey = "coachLastReminder"
     private let trackedPostureKey = "coachTrackedPosture"
 
@@ -47,6 +48,7 @@ final class PostureCoach: ObservableObject {
             trackedPosture = posture
             currentPosture = posture
             nextPosture = posture == .sitting ? .standing : .sitting
+            record("Restored \(posture.rawValue) posture and interval anchor")
         }
         positionObservation = DeskController.shared.$speedCmPerSecond
             .sink { [weak self] speed in
@@ -59,20 +61,33 @@ final class PostureCoach: ObservableObject {
     }
 
     func requestPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+            Task { @MainActor in
+                if let error {
+                    self.record("Notification permission failed: \(error.localizedDescription)")
+                } else {
+                    self.record("Notification permission \(granted ? "granted" : "denied")")
+                }
+            }
+        }
     }
 
     func cancelPendingMovement() {
+        let cancelledPreset = pendingMovement?.preset.name
         countdownTask?.cancel()
         countdownTask = nil
         pendingMovement = nil
         remainingSeconds = 0
+        if let cancelledPreset {
+            record("Cancelled countdown to \(cancelledPreset)")
+        }
     }
 
     func resetSchedule() {
         cancelPendingMovement()
         removeCoachNotifications()
         UserDefaults.standard.set(Date(), forKey: lastReminderKey)
+        record("Schedule reset from current time")
         evaluate()
     }
 
@@ -109,6 +124,7 @@ final class PostureCoach: ObservableObject {
             nextReminder = nil
             nextScheduleStart = nil
             pauseReason = nil
+            recordState("Inactive")
             return
         }
 
@@ -122,6 +138,7 @@ final class PostureCoach: ObservableObject {
             nextReminder = nil
             nextScheduleStart = nextActiveScheduleStart(settings: settings, after: now)
             pauseReason = nil
+            recordState("Outside schedule; next start \(formatted(nextScheduleStart))")
             return
         }
         nextScheduleStart = nil
@@ -129,6 +146,7 @@ final class PostureCoach: ObservableObject {
         guard let lastReminder = UserDefaults.standard.object(forKey: lastReminderKey) as? Date else {
             UserDefaults.standard.set(now, forKey: lastReminderKey)
             scheduleNextDate(from: now)
+            recordState("Initialized \(currentPosture.rawValue) interval; due \(formatted(nextReminder))")
             return
         }
 
@@ -139,14 +157,24 @@ final class PostureCoach: ObservableObject {
         if let reason = automaticMovementPauseReason(settings: settings) {
             cancelPendingMovement()
             pauseReason = reason
+            recordState("Automatic movement paused by \(reason == .meeting ? "meeting activity" : "Focus")")
             return
         }
         pauseReason = nil
 
-        guard now >= due, pendingMovement == nil else { return }
+        guard now >= due, pendingMovement == nil else {
+            if pendingMovement == nil {
+                recordState("\(currentPosture.rawValue) interval; due \(formatted(due))")
+            }
+            return
+        }
 
         let targetKind: PresetKind = sitting ? .standing : .sitting
-        guard let target = settings.presets.first(where: { $0.kind == targetKind }) else { return }
+        guard let target = settings.presets.first(where: { $0.kind == targetKind }) else {
+            record("Interval due but no \(targetKind.rawValue) preset was available")
+            return
+        }
+        record("Interval due; target is \(target.name) at \(String(format: "%.1f", target.heightCm)) cm")
 
         if settings.coachReminderEnabled || settings.automaticMovementEnabled {
             sendReminder(target: target, includesCountdown: settings.automaticMovementEnabled)
@@ -163,6 +191,7 @@ final class PostureCoach: ObservableObject {
         cancelPendingMovement()
         pendingMovement = PendingMovement(preset: preset)
         remainingSeconds = max(seconds, 5)
+        record("Started \(remainingSeconds)-second countdown to \(preset.name)")
 
         countdownTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -177,8 +206,12 @@ final class PostureCoach: ObservableObject {
                     if let reason = self.automaticMovementPauseReason(settings: settings) {
                         self.pauseReason = reason
                         self.remainingSeconds = 0
+                        self.record("Countdown ended but movement was paused by \(reason == .meeting ? "meeting activity" : "Focus")")
                     } else if let target, DeskController.shared.state.isConnected {
+                        self.record("Countdown completed; moving to \(target.name)")
                         DeskController.shared.move(to: target)
+                    } else {
+                        self.record("Countdown completed but desk was not connected")
                     }
                     return
                 }
@@ -198,13 +231,20 @@ final class PostureCoach: ObservableObject {
             content.userInfo[DeskBuddyNotification.presetIDKey] = target.id.uuidString
         }
         content.sound = .default
-        UNUserNotificationCenter.current().add(
-            UNNotificationRequest(
+        let request = UNNotificationRequest(
                 identifier: DeskBuddyNotification.postureCoachRequest,
                 content: content,
                 trigger: nil
             )
-        )
+        UNUserNotificationCenter.current().add(request) { [weak self] error in
+            Task { @MainActor in
+                if let error {
+                    self?.record("Notification failed for \(target.name): \(error.localizedDescription)")
+                } else {
+                    self?.record("Notification delivered for \(target.name) (\(includesCountdown ? "automatic" : "reminder"))")
+                }
+            }
+        }
     }
 
     private func deskPositionDidChange(height: Double?, speed: Double) {
@@ -213,11 +253,12 @@ final class PostureCoach: ObservableObject {
               let posture = postureAtPreset(height: height),
               posture != trackedPosture else { return }
 
-                trackedPosture = posture
+            trackedPosture = posture
         currentPosture = posture
         nextPosture = posture == .sitting ? .standing : .sitting
         UserDefaults.standard.set(posture.rawValue, forKey: trackedPostureKey)
         UserDefaults.standard.set(Date(), forKey: lastReminderKey)
+        record("Reached \(posture.rawValue) preset at \(String(format: "%.1f", height)) cm; started new interval")
         cancelPendingMovement()
         removeCoachNotifications()
         evaluate()
@@ -239,6 +280,21 @@ final class PostureCoach: ObservableObject {
         let identifiers = [DeskBuddyNotification.postureCoachRequest]
         center.removePendingNotificationRequests(withIdentifiers: identifiers)
         center.removeDeliveredNotifications(withIdentifiers: identifiers)
+        record("Cleared previous interval notification")
+    }
+
+    private func recordState(_ state: String) {
+        guard state != lastDiagnosticState else { return }
+        lastDiagnosticState = state
+        record(state)
+    }
+
+    private func record(_ message: String) {
+        DeskController.shared.recordDiagnosticEvent("Coach: \(message)")
+    }
+
+    private func formatted(_ date: Date?) -> String {
+        date.map { ISO8601DateFormatter().string(from: $0) } ?? "unavailable"
     }
 
     private func currentPostureIsSitting() -> Bool {

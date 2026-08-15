@@ -30,6 +30,7 @@ final class DeskBuddyAppDelegate: NSObject, NSApplicationDelegate, UNUserNotific
                 intentIdentifiers: []
             )
         ])
+        DeskController.shared.recordDiagnosticEvent("Notifications: action categories registered")
         let workspaceNotifications = NSWorkspace.shared.notificationCenter
         workspaceNotifications.addObserver(
             self,
@@ -67,7 +68,13 @@ final class DeskBuddyAppDelegate: NSObject, NSApplicationDelegate, UNUserNotific
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+        let category = notification.request.content.categoryIdentifier
+        await MainActor.run {
+            DeskController.shared.recordDiagnosticEvent(
+                "Notifications: presenting \(category) banner"
+            )
+        }
+        return [.banner, .sound]
     }
 
     nonisolated func userNotificationCenter(
@@ -77,6 +84,7 @@ final class DeskBuddyAppDelegate: NSObject, NSApplicationDelegate, UNUserNotific
         switch response.actionIdentifier {
         case DeskBuddyNotification.stopAutomaticMovementAction:
             await MainActor.run {
+                DeskController.shared.recordDiagnosticEvent("Notifications: Stop / Cancel action selected")
                 PostureCoach.shared.cancelPendingMovement()
                 DeskController.shared.stopMovement()
             }
@@ -84,9 +92,20 @@ final class DeskBuddyAppDelegate: NSObject, NSApplicationDelegate, UNUserNotific
             guard let rawPresetID = response.notification.request.content.userInfo[
                 DeskBuddyNotification.presetIDKey
             ] as? String,
-                  let presetID = UUID(uuidString: rawPresetID) else { return }
+                  let presetID = UUID(uuidString: rawPresetID) else {
+                await MainActor.run {
+                    DeskController.shared.recordDiagnosticEvent(
+                        "Notifications: Move Desk action had no valid target"
+                    )
+                }
+                return
+            }
             await MainActor.run {
-                guard let preset = SettingsStore.shared.presets.first(where: { $0.id == presetID }) else { return }
+                guard let preset = SettingsStore.shared.presets.first(where: { $0.id == presetID }) else {
+                    DeskController.shared.recordDiagnosticEvent("Notifications: Move Desk action target was unavailable")
+                    return
+                }
+                DeskController.shared.recordDiagnosticEvent("Notifications: Move Desk action selected for \(preset.name)")
                 DeskController.shared.move(to: preset)
             }
         default:
