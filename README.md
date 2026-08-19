@@ -34,6 +34,7 @@ DeskBuddy keeps everyday desk controls close without turning them into another d
 - **Move your way** — Hold the menu controls, choose a saved position, use a global shortcut, or run an Apple Shortcut.
 - **Make the paddle smarter** — Start with double up and double down, then assign custom multi-tap sequences to any saved position.
 - **Build a better rhythm** — Set sitting and standing intervals, active hours, reminders, and optional automatic movement.
+- **Review your routine** — Compare sitting, standing, and other connected time across days, weeks, months, years, desks, or all time.
 - **Stay interruption-aware** — Pause automatic movement while a camera, microphone, or selected macOS Focus is active.
 - **See the essentials** — Keep the current height and next posture change visible from the menu bar.
 - **Feel native** — SwiftUI, Liquid Glass, launch at login, automatic reconnection, and built-in updates.

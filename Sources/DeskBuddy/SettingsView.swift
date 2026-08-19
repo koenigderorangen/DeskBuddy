@@ -7,6 +7,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     case interactions
     case shortcuts
     case coach
+    case statistics
     case diagnostics
     case about
 
@@ -20,6 +21,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .interactions: "Interactions"
         case .shortcuts: "Keyboard Shortcuts"
         case .coach: "Posture Coach"
+        case .statistics: "Statistics"
         case .diagnostics: "Diagnostics"
         case .about: "About"
         }
@@ -31,6 +33,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .interactions: "hand.tap"
         case .shortcuts: "keyboard"
         case .coach: "figure.mind.and.body"
+        case .statistics: "chart.bar.xaxis"
         case .diagnostics: "stethoscope"
         case .about: "info.circle"
         }
@@ -91,6 +94,7 @@ struct SettingsView: View {
         case .interactions: interactionSettings
         case .shortcuts: shortcutSettings
         case .coach: coachSettings
+        case .statistics: StatisticsView()
         case .diagnostics: diagnosticsSettings
         case .about: aboutSettings
         }

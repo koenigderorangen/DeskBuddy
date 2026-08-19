@@ -52,15 +52,18 @@ final class DeskBuddyAppDelegate: NSObject, NSApplicationDelegate, UNUserNotific
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        PostureStatisticsStore.shared.stopTracking()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
     @objc private func systemWillSleep() {
+        PostureStatisticsStore.shared.pauseTracking()
         DeskController.shared.systemWillSleep()
     }
 
     @objc private func systemDidWake() {
         DeskController.shared.systemDidWake()
+        PostureStatisticsStore.shared.resumeTracking()
         PostureCoach.shared.refreshSchedule()
     }
 
@@ -127,6 +130,7 @@ struct DeskBuddyApp: App {
             NSApplication.shared.applicationIconImage = icon
         }
         _ = PostureCoach.shared
+        _ = PostureStatisticsStore.shared
         _ = GlobalShortcutCenter.shared
     }
 

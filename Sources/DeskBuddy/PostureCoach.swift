@@ -36,7 +36,10 @@ final class PostureCoach: ObservableObject {
     private var evaluationTimer: Timer?
     private var countdownTask: Task<Void, Never>?
     private var positionObservation: AnyCancellable?
+    private var connectionObservation: AnyCancellable?
     private var trackedPosture: PresetKind?
+    private var wasDeskConnected = false
+    private var isSuspendedForDisconnectedDesk = false
     private var lastDiagnosticState: String?
     private let lastReminderKey = "coachLastReminder"
     private let trackedPostureKey = "coachTrackedPosture"
@@ -53,6 +56,12 @@ final class PostureCoach: ObservableObject {
         positionObservation = DeskController.shared.$speedCmPerSecond
             .sink { [weak self] speed in
                 self?.deskPositionDidChange(height: DeskController.shared.heightCm, speed: speed)
+            }
+        connectionObservation = DeskController.shared.$state
+            .map(\.isConnected)
+            .removeDuplicates()
+            .sink { [weak self] isConnected in
+                self?.deskConnectionDidChange(isConnected: isConnected)
             }
         evaluationTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.evaluate() }
@@ -97,6 +106,10 @@ final class PostureCoach: ObservableObject {
 
 #if DEBUG
     func sendTestNotification() {
+        guard DeskController.shared.state.isConnected else {
+            record("Test reminder skipped because no desk was connected")
+            return
+        }
         let settings = SettingsStore.shared
         let targetKind: PresetKind = currentPostureIsSitting() ? .standing : .sitting
         guard let target = settings.presets.first(where: { $0.kind == targetKind }) else { return }
@@ -108,6 +121,10 @@ final class PostureCoach: ObservableObject {
     }
 
     func triggerTestCountdown() {
+        guard DeskController.shared.state.isConnected else {
+            record("Test countdown skipped because no desk was connected")
+            return
+        }
         let settings = SettingsStore.shared
         let targetKind: PresetKind = currentPostureIsSitting() ? .standing : .sitting
         guard let target = settings.presets.first(where: { $0.kind == targetKind }) else { return }
@@ -118,6 +135,10 @@ final class PostureCoach: ObservableObject {
 
     private func evaluate() {
         let settings = SettingsStore.shared
+        guard DeskController.shared.state.isConnected else {
+            suspendForDisconnectedDesk()
+            return
+        }
         guard settings.coachEnabled,
               settings.coachReminderEnabled || settings.automaticMovementEnabled else {
             cancelPendingMovement()
@@ -187,6 +208,30 @@ final class PostureCoach: ObservableObject {
         scheduleNextDate(from: now)
     }
 
+    private func deskConnectionDidChange(isConnected: Bool) {
+        guard isConnected != wasDeskConnected else { return }
+        wasDeskConnected = isConnected
+        if isConnected {
+            isSuspendedForDisconnectedDesk = false
+            UserDefaults.standard.set(Date(), forKey: lastReminderKey)
+            record("Desk connected; started a fresh posture interval")
+            evaluate()
+        } else {
+            suspendForDisconnectedDesk()
+        }
+    }
+
+    private func suspendForDisconnectedDesk() {
+        guard !isSuspendedForDisconnectedDesk else { return }
+        isSuspendedForDisconnectedDesk = true
+        cancelPendingMovement()
+        removeCoachNotifications()
+        nextReminder = nil
+        nextScheduleStart = nil
+        pauseReason = nil
+        recordState("Inactive because no desk is connected")
+    }
+
     private func startCountdown(to preset: DeskPreset, seconds: Int) {
         cancelPendingMovement()
         pendingMovement = PendingMovement(preset: preset)
@@ -232,10 +277,10 @@ final class PostureCoach: ObservableObject {
         }
         content.sound = .default
         let request = UNNotificationRequest(
-                identifier: DeskBuddyNotification.postureCoachRequest,
-                content: content,
-                trigger: nil
-            )
+            identifier: DeskBuddyNotification.postureCoachRequest,
+            content: content,
+            trigger: nil
+        )
         UNUserNotificationCenter.current().add(request) { [weak self] error in
             Task { @MainActor in
                 if let error {
@@ -253,7 +298,7 @@ final class PostureCoach: ObservableObject {
               let posture = postureAtPreset(height: height),
               posture != trackedPosture else { return }
 
-            trackedPosture = posture
+        trackedPosture = posture
         currentPosture = posture
         nextPosture = posture == .sitting ? .standing : .sitting
         UserDefaults.standard.set(posture.rawValue, forKey: trackedPostureKey)
